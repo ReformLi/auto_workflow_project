@@ -26,6 +26,7 @@ class WorkflowEvents(QObject):
     # 操作
     execution_paused = pyqtSignal()
     execution_resumed = pyqtSignal()
+    execution_stopped = pyqtSignal()
 
     # 错误信息
     error_occurred = pyqtSignal(str, str)      # node_id, 错误信息

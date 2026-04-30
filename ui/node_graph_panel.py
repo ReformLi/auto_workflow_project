@@ -13,18 +13,23 @@ import logging
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QMenu
+from PyQt5 import QtGui
 
 from core.events import event_bus
+from ui.styles import ThemeManager
 
 
 class NodeGraphPanel(QWidget):
-    def __init__(self, core_manager):
+    def __init__(self, core_manager=None,theme_manager=None):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.core_manager = core_manager
         self.graph_manager = self.core_manager.graph_manager
 
         self.view = self.core_manager.get_view()
+
+        self.theme_manager = theme_manager or ThemeManager()  # 使用主题管理器
+        self.update_theme(self.theme_manager)
         # 鼠标右键
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self.on_view_context_menu)
@@ -33,6 +38,24 @@ class NodeGraphPanel(QWidget):
         self.view.dropEvent = self.view_dropEvent
         # 获取图形视图并设置拖拽
         self.view.setAcceptDrops(True)  # 允许 view 接收拖拽
+
+    def get_widget(self):
+        return self.core_manager.get_widget()
+
+    def update_theme(self, theme_manager):
+        """更新节点图主题"""
+        try:
+            # NodeGraphQt 的主题设置
+            scene = self.view.scene()
+            if theme_manager.current_theme == 'dark':
+                # 深色主题
+                scene.setBackgroundBrush(QtGui.QColor('#1e1e1e'))
+            else:
+                # 浅色主题
+                scene.setBackgroundBrush(QtGui.QColor('#f5f5f5'))
+            self.logger.info(f'节点图主题已更新为: {theme_manager.current_theme}')
+        except Exception as e:
+            self.logger.error(f'更新节点图主题失败: {str(e)}')
 
     def on_view_context_menu(self, pos):
         """处理视图右键菜单"""

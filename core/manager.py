@@ -103,4 +103,40 @@ class CoreManager:
         return []
 
     def get_view(self):
-        return self.graph_manager.view
+        """获取节点图的视图组件"""
+        return self.graph_manager.get_view()
+
+    def get_widget(self):
+        """获取节点图的widget组件"""
+        return self.graph_manager.graph_widget
+
+    def validate_workflow(self):
+        """验证当前工作流的有效性"""
+        try:
+            # 简单的验证逻辑 - 检查是否有开始和结束节点
+            nodes = self.graph_manager.node_graph.all_nodes()
+            if not nodes:
+                return {'success': False, 'message': '工作流为空，请添加节点'}
+
+            # 检查是否有开始节点
+            start_nodes = [node for node in nodes if hasattr(node, 'NODE_NAME') and 'start' in node.NODE_NAME.lower()]
+            if not start_nodes:
+                return {'success': False, 'message': '工作流缺少开始节点'}
+
+            # 检查是否有结束节点
+            end_nodes = [node for node in nodes if hasattr(node, 'NODE_NAME') and 'end' in node.NODE_NAME.lower()]
+            if not end_nodes:
+                return {'success': False, 'message': '工作流缺少结束节点'}
+
+            return {'success': True, 'message': '工作流验证通过'}
+
+        except Exception as e:
+            return {'success': False, 'message': f'验证过程中发生错误: {str(e)}'}
+
+    def get_node_count(self):
+        """获取当前工作流中的节点数量"""
+        try:
+            return len(self.graph_manager.node_graph.all_nodes())
+        except Exception:
+            return 0
+

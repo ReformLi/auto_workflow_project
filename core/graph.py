@@ -62,8 +62,8 @@ class NodeGraphManager:
             self.graph_widget = QTextEdit()
             self.graph_widget.setPlainText(f"节点图编辑器加载失败: {str(e)}\n\n请确保 NodeGraphQt 已正确安装。")
 
-    def get_widget(self):
-        return self.graph_widget
+    def get_view(self):
+        return self.view
 
     def register_node_classes(self,classes):
         """注册节点类型（从节点注册表获取）"""

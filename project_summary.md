@@ -49,19 +49,15 @@
 ## 项目结构
 
 ```
-auto_workflow_project/
-├── main.py                     # 主程序入口 (15KB)
-├── requirements.txt            # 依赖包列表
-├── README.md                   # 项目说明文档
-├── test_app.py                 # 应用程序测试脚本
-├── demo.py                     # 功能演示脚本
-├── project_summary.md          # 项目总结报告
-├── nodes/                      # 节点定义目录
+window_automation_workflow/
+├── app                        # 应用入口与全局配置
+├── core/                       # 核心业务层（逻辑中枢）
+├── nodes/                     # 节点模块
 │   └── base_nodes.py          # 基础节点定义 (5KB)
-├── utils/                      # 工具类目录
-│   └── workflow_utils.py      # 工作流工具类 (12KB)
-└── icons/                      # 图标资源目录
-    └── README.txt             # 图标说明
+├── ui/                         # 用户界面层（视图组件）
+├── automation/                 # 窗口自动化引擎（底层执行）
+├── resources/                  # 静态资源
+└── tests/                      # 测试模块
 ```
 
 ## 文件大小统计
