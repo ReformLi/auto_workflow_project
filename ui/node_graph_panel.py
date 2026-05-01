@@ -17,6 +17,7 @@ from PyQt5 import QtGui
 
 from core.events import event_bus
 from ui.styles import ThemeManager
+from NodeGraphQt.constants import ViewerEnum
 
 
 class NodeGraphPanel(QWidget):
@@ -54,6 +55,20 @@ class NodeGraphPanel(QWidget):
                 # 浅色主题
                 scene.setBackgroundBrush(QtGui.QColor('#f5f5f5'))
             self.logger.info(f'节点图主题已更新为: {theme_manager.current_theme}')
+        except Exception as e:
+            self.logger.error(f'更新节点图主题失败: {str(e)}')
+
+    def update_grid(self, grid_display):
+        """更新节点图网格线"""
+        try:
+            # 显示网格线
+            if grid_display:
+                # # GRID_DISPLAY_LINES (2)：线状网格（最明显）
+                self.graph_manager.node_graph.set_grid_mode(ViewerEnum.GRID_DISPLAY_LINES.value)
+            else:
+                # GRID_DISPLAY_NONE (0)：无网格
+                self.graph_manager.node_graph.set_grid_mode(ViewerEnum.GRID_DISPLAY_NONE.value)
+            self.logger.info(f'节点图网格线已更新: {grid_display}')
         except Exception as e:
             self.logger.error(f'更新节点图主题失败: {str(e)}')
 

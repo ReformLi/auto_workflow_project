@@ -556,6 +556,8 @@ class ThemeManager:
         self.current_theme = 'light'  # 'dark' or 'light'
         self.colors = ThemeColors.LIGHT
 
+        self.grid_display = True
+
     def set_theme(self, theme_name):
         """设置主题"""
         if theme_name.lower() == 'light':

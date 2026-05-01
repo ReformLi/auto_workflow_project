@@ -7,8 +7,10 @@ settings_dialog.py
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QComboBox,
-    QGroupBox, QFormLayout, QDialogButtonBox
+    QGroupBox, QFormLayout, QDialogButtonBox, QWidget, QHBoxLayout, QLabel, QCheckBox
 )
+
+from tests.mytest23 import Switch
 
 
 class SettingsDialog(QDialog):
@@ -39,6 +41,12 @@ class SettingsDialog(QDialog):
 
         appearance_layout.addRow('主题模式:', self.theme_combo)
         appearance_group.setLayout(appearance_layout)
+
+        # 显示状态栏选项（复选框）
+        self.statusbar_checkbox = QCheckBox('显示网格线')
+        self.statusbar_checkbox.setChecked(self.theme_manager.grid_display)  # 默认显示，可按需调整
+        appearance_layout.addRow('', self.statusbar_checkbox)  # 第二个参数作为标签右侧的控件，留空标签
+        self._old_statusbar_state = self.statusbar_checkbox.isChecked()
 
         main_layout.addWidget(appearance_group)
 
@@ -111,12 +119,19 @@ class SettingsDialog(QDialog):
         # 应用主题设置
         theme_index = self.theme_combo.currentIndex()
         new_theme = 'dark' if theme_index == 0 else 'light'
-
         if new_theme != self.theme_manager.current_theme:
             self.theme_manager.set_theme(new_theme)
             # 通知父窗口主题已更改
             if hasattr(self.parent(), 'apply_theme'):
                 self.parent().apply_theme()
+
+        statusbar_checkbox = self.statusbar_checkbox.isChecked()
+        if statusbar_checkbox != self.theme_manager.grid_display :
+            # 更新旧值
+            self.theme_manager.grid_display = statusbar_checkbox
+            # 通知父窗口需更换网格线
+            if hasattr(self.parent(), 'update_grid'):
+                self.parent().update_grid(self.theme_manager.grid_display)
         # 这里可以保存其他设置到配置文件
         # TODO: 实现设置保存功能
 
@@ -129,6 +144,7 @@ class SettingsDialog(QDialog):
         """获取当前设置"""
         return {
             'theme': 'dark' if self.theme_combo.currentIndex() == 0 else 'light',
+            'statusbar_checkbox': self.statusbar_checkbox.isChecked(),
             'auto_save': self.auto_save_combo.currentText(),
             'timeout': self.timeout_combo.currentText(),
             'log_level': self.log_level_combo.currentText(),

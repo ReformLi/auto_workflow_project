@@ -29,7 +29,7 @@ class WorkflowEvents(QObject):
     execution_stopped = pyqtSignal()
 
     # 错误信息
-    error_occurred = pyqtSignal(str, str)      # node_id, 错误信息
+    error_occurred = pyqtSignal(str)      #  错误信息
 
     # 图结构变更（供 UI 同步）
     graph_changed = pyqtSignal()
@@ -41,6 +41,10 @@ class WorkflowEvents(QObject):
 
     # 拖拽创建节点时使用  str:节点类型,QtCore.QPointF:节点创建坐标
     node_dropped = pyqtSignal(str, QtCore.QPointF)
+
+    # 新增两个信号，用于向主线程传递节点执行开始/结束信息（携带节点ID）
+    node_exec_started = pyqtSignal(str)  # node_id
+    node_exec_finished = pyqtSignal(str, float, bool)  # node_id, elapsed_seconds, is_error
 
 
 

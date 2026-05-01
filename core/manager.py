@@ -9,6 +9,8 @@ manager.py
 功能描述: 核心管理器--CoreManager 是核心业务层的对外门面，负责初始化 NodeGraphManager 和 WorkflowExecutor，并将它们与 UI 所需信号接通。
 """
 # core/manager.py
+import logging
+
 from core.graph import NodeGraphManager
 from core.executor import WorkflowExecutor
 from core.events import event_bus
@@ -19,6 +21,7 @@ class CoreManager:
     """核心业务管理器，是 UI 层与核心层的唯一交互接口"""
 
     def __init__(self):
+        self.logger = logging.getLogger(__name__)
         # 初始化图管理器（widget 将在稍后由 UI 嵌入）
         self.graph_manager = NodeGraphManager()
         # 初始化执行引擎
@@ -81,7 +84,7 @@ class CoreManager:
 
     def _on_execution_finished(self, success: bool):
         """执行结束后的清理或通知（可扩展）"""
-        print(f"工作流执行完成: {'成功' if success else '失败'}")
+        self.logger.info(f"工作流执行完成: {'成功' if success else '失败'}")
 
     def get_available_nodes(self):
         """返回所有可用节点的菜单信息列表"""

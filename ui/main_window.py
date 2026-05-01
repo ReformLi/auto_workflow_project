@@ -635,6 +635,11 @@ class WorkflowMainWindow(QMainWindow):
 
         self.logger.info(f'主题已切换为: {self.theme_manager.current_theme}')
 
+    def update_grid(self,grid_display:bool):
+        # 更新节点图网格线
+        if hasattr(self, 'node_graph_panel'):
+            self.node_graph_panel.update_grid(grid_display)
+
     def update_log_handler_theme(self):
         """更新日志处理器主题"""
         # 找到我们的TextEditHandler并更新其主题
