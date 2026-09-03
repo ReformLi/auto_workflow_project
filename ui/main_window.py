@@ -704,12 +704,7 @@ class WorkflowMainWindow(QMainWindow):
         """暂停工作流"""
         try:
             self.logger.info('⏸️ 暂停工作流执行')
-            self.update_execution_buttons('paused')
-            if hasattr(self, '_executor'):
-                self._executor.pause()
-            else:
-                # 如果没有执行器，也更新按钮状态
-                self.update_execution_buttons('paused')
+            self.core_manager.pause_workflow()
         except Exception as e:
             self.logger.error(f'暂停工作流失败: {str(e)}')
 
@@ -717,12 +712,7 @@ class WorkflowMainWindow(QMainWindow):
         """恢复工作流"""
         try:
             self.logger.info('▶️ 恢复工作流执行')
-            self.update_execution_buttons('running')
-            if hasattr(self, '_executor'):
-                self._executor.resume()
-            else:
-                # 模拟恢复操作
-                self.update_execution_buttons('running')
+            self.core_manager.resume_workflow()
         except Exception as e:
             self.logger.error(f'恢复工作流失败: {str(e)}')
 
@@ -730,15 +720,9 @@ class WorkflowMainWindow(QMainWindow):
         """终止工作流"""
         try:
             self.logger.warning('⏹️ 终止工作流执行')
-            self.update_execution_buttons('stopped')
-            if hasattr(self, '_executor'):
-                self._executor.stop()
-            else:
-                # 模拟停止操作
-                self.update_execution_buttons('stopped')
+            self.core_manager.stop_workflow()
         except Exception as e:
             self.logger.error(f'终止工作流失败: {str(e)}')
-            self.update_execution_buttons('idle')
 
     def setup_log_search_toolbar(self, parent):
         """设置日志搜索工具栏"""

@@ -14,6 +14,7 @@ import logging
 from core.graph import NodeGraphManager
 from core.executor import WorkflowExecutor
 from core.events import event_bus
+from core.validation import WorkflowValidator
 from nodes import discover_nodes
 
 
@@ -37,6 +38,18 @@ class CoreManager:
     def execute_workflow(self):
         """执行当前工作流（由 UI 触发）"""
         self._executor.start()
+
+    def pause_workflow(self):
+        """暂停当前正在执行的工作流"""
+        self._executor.pause()
+
+    def resume_workflow(self):
+        """恢复暂停的工作流"""
+        self._executor.resume()
+
+    def stop_workflow(self):
+        """终止当前正在执行的工作流"""
+        self._executor.stop()
 
     def new_workflow(self):
         """清空并新建工作流"""
@@ -102,7 +115,8 @@ class CoreManager:
         """返回指定节点类型的属性定义列表"""
         for cls in self._node_classes:
             if cls.__name__ == node_type:
-                return cls.get_property_defs()
+                defs = getattr(cls, 'get_property_defs', None)
+                return list(defs()) if callable(defs) else []
         return []
 
     def get_view(self):
@@ -114,25 +128,9 @@ class CoreManager:
         return self.graph_manager.graph_widget
 
     def validate_workflow(self):
-        """验证当前工作流的有效性"""
+        """验证当前工作流的有效性（委托 WorkflowValidator）"""
         try:
-            # 简单的验证逻辑 - 检查是否有开始和结束节点
-            nodes = self.graph_manager.node_graph.all_nodes()
-            if not nodes:
-                return {'success': False, 'message': '工作流为空，请添加节点'}
-
-            # 检查是否有开始节点
-            start_nodes = [node for node in nodes if hasattr(node, 'NODE_NAME') and 'start' in node.NODE_NAME.lower()]
-            if not start_nodes:
-                return {'success': False, 'message': '工作流缺少开始节点'}
-
-            # 检查是否有结束节点
-            end_nodes = [node for node in nodes if hasattr(node, 'NODE_NAME') and 'end' in node.NODE_NAME.lower()]
-            if not end_nodes:
-                return {'success': False, 'message': '工作流缺少结束节点'}
-
-            return {'success': True, 'message': '工作流验证通过'}
-
+            return WorkflowValidator.validate(self.graph_manager.get_all_nodes())
         except Exception as e:
             return {'success': False, 'message': f'验证过程中发生错误: {str(e)}'}
 

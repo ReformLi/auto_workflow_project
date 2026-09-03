@@ -29,8 +29,10 @@ class WorkflowWorker(QObject):
         self._thread = thread
         self._stop_flag = False
         self._pause_flag = False
-        # 连接控制信号（来自事件总线，但仍会在子线程中执行槽函数）
+        # 连接控制信号（来自事件总线，跨线程自动队列投递，槽函数在子线程中执行）
         event_bus.stop_signal.connect(self._on_stop)
+        event_bus.pause_signal.connect(self._on_pause)
+        event_bus.resume_signal.connect(self._on_resume)
 
     def run(self):
         """线程启动后自动执行（通过 started 信号触发）"""
@@ -38,7 +40,8 @@ class WorkflowWorker(QObject):
         try:
             start_node = self._find_start_node()
             if not start_node:
-                event_bus.error_occurred.emit("", "未找到开始节点")
+                event_bus.error_occurred.emit("未找到开始节点")
+                event_bus.execution_finished.emit(False)
                 return
             self._execute_graph(start_node)
             event_bus.execution_finished.emit(True)
@@ -119,56 +122,21 @@ class WorkflowWorker(QObject):
                 return node
         return None
 
-    def finished(self):
-        pass
-
     # ---------- 控制槽（在子线程中执行，安全修改标志）----------
     def _on_stop(self):
         self._stop_flag = True
         logger.info("工作流终止请求")
+        event_bus.execution_stopped.emit()
 
     def _on_pause(self):
         self._pause_flag = True
         logger.info("工作流已暂停")
+        event_bus.execution_paused.emit()
 
     def _on_resume(self):
         self._pause_flag = False
         logger.info("工作流已恢复")
-
-    def _validate_workflow(self) -> bool:
-        """验证工作流完整性：必须包含一个开始节点和一个结束节点，且开始节点无输入，结束节点无输出"""
-        all_nodes = self.node_graph.all_nodes()
-        start_nodes = [n for n in all_nodes if hasattr(n, 'is_start_node') and n.is_start_node()]
-        end_nodes = [n for n in all_nodes if hasattr(n, 'is_end_node') and n.is_end_node()]
-
-        if len(start_nodes) == 0:
-            event_bus.error_occurred.emit("工作流缺少开始节点")
-            return False
-        if len(start_nodes) > 1:
-            event_bus.error_occurred.emit("工作流包含多个开始节点，请确保只有一个")
-            return False
-        if len(end_nodes) == 0:
-            event_bus.error_occurred.emit("工作流缺少结束节点")
-            return False
-        if len(end_nodes) > 1:
-            event_bus.error_occurred.emit("工作流包含多个结束节点，请确保只有一个")
-            return False
-
-        # 可选：检查开始节点没有输入端口连接
-        start_node = start_nodes[0]
-        if start_node.input_ports() and any(
-                start_node.input_ports()[i].connected_ports() for i in range(len(start_node.input_ports()))):
-            event_bus.error_occurred.emit("开始节点不应有输入连接")
-            return False
-
-        # 检查结束节点没有输出端口连接
-        end_node = end_nodes[0]
-        if end_node.output_ports() and any(
-                end_node.output_ports()[i].connected_ports() for i in range(len(end_node.output_ports()))):
-            event_bus.error_occurred.emit("结束节点不应有输出连接")
-            return False
-
-        return True
+        event_bus.execution_resumed.emit()
 
 # ================= 工作流执行器（运行在主线程） =================
 class WorkflowExecutor(QObject):
@@ -177,6 +145,9 @@ class WorkflowExecutor(QObject):
         self.node_graph = node_graph
         self._thread = None
         self._worker = None
+        # 只连接一次，避免每次 start() 叠加连接（连接泄漏）
+        event_bus.node_exec_started.connect(self._on_node_started)
+        event_bus.node_exec_finished.connect(self._on_node_finished)
 
     def start(self):
         if self._thread is not None and self._thread.isRunning():
@@ -187,10 +158,6 @@ class WorkflowExecutor(QObject):
         self._thread = QThread()
         self._worker = WorkflowWorker(self.node_graph, self._thread)
         self._worker.moveToThread(self._thread)
-
-        # 连接工作器的信号到本执行器的槽（这些槽将在主线程执行）
-        event_bus.node_exec_started.connect(self._on_node_started)
-        event_bus.node_exec_finished.connect(self._on_node_finished)
 
         # 线程生命周期管理
         self._thread.finished.connect(self._on_thread_finished)
@@ -218,6 +185,16 @@ class WorkflowExecutor(QObject):
     def stop(self):
         if self._worker:
             event_bus.stop_signal.emit()
+
+    def pause(self):
+        """请求暂停当前正在执行的工作流（仅在有活动 worker 时生效）"""
+        if self._worker:
+            event_bus.pause_signal.emit()
+
+    def resume(self):
+        """恢复暂停的工作流"""
+        if self._worker:
+            event_bus.resume_signal.emit()
 
     # ---------- 以下槽函数在主线程中执行，安全更新节点UI ----------
     def _on_node_started(self, node_id: str):

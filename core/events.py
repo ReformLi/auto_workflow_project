@@ -38,6 +38,8 @@ class WorkflowEvents(QObject):
     finished = pyqtSignal()  # 线程结束
 
     stop_signal = pyqtSignal()
+    pause_signal = pyqtSignal()     # 暂停请求（UI → 执行器）
+    resume_signal = pyqtSignal()    # 恢复请求（UI → 执行器）
 
     # 拖拽创建节点时使用  str:节点类型,QtCore.QPointF:节点创建坐标
     node_dropped = pyqtSignal(str, QtCore.QPointF)
