@@ -10,8 +10,6 @@ from PyQt5.QtWidgets import (
     QGroupBox, QFormLayout, QDialogButtonBox, QWidget, QHBoxLayout, QLabel, QCheckBox
 )
 
-from tests.mytest23 import Switch
-
 
 class SettingsDialog(QDialog):
     """设置对话框"""
