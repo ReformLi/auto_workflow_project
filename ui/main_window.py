@@ -6,19 +6,19 @@
 import logging
 
 from PyQt5 import QtWidgets
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QFont, QTextCharFormat, QColor
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QAction, QFileDialog,
-    QTextEdit, QDockWidget, QToolBar, QSplitter,
-    QVBoxLayout, QMessageBox, QHBoxLayout, QPushButton,
-    QLineEdit, QLabel, QToolButton, QDialog
+    QMainWindow, QWidget,
+    QTextEdit, QDockWidget, QSplitter,
+    QVBoxLayout, QMessageBox, QDialog
 )
 
 from app.config import WINDOW_HEIGHT, WINDOW_WIDTH
 from core.events import event_bus
 from core.manager import CoreManager
 from ui.actions import build_menu_bar, build_tool_bar
+from ui.execution_controller import ExecutionController
 from ui.file_actions import FileActions
 from ui.log_panel import TextEditHandler
 from ui.log_search_bar import LogSearchBar
@@ -48,6 +48,7 @@ class WorkflowMainWindow(QMainWindow):
 
         # 控制器（先于 UI 创建，菜单/工具栏构建时需要绑定其方法）
         self.file_actions = FileActions(self)
+        self.execution = ExecutionController(self)
 
         # 初始化 UI
         self.setup_ui()
@@ -57,13 +58,6 @@ class WorkflowMainWindow(QMainWindow):
         event_bus.node_started.connect(lambda name: self.logger.info(f"执行节点: {name}"))
         event_bus.node_finished.connect(lambda name, dict: self.logger.info(f"节点完成: {name},返回信息：{dict}"))
         event_bus.error_occurred.connect(lambda err: self.logger.error(err))
-
-        # 连接执行状态更新
-        event_bus.execution_started.connect(lambda: self.update_execution_buttons('running'))
-        event_bus.execution_finished.connect(lambda: self.update_execution_buttons('idle'))
-        event_bus.execution_paused.connect(lambda: self.update_execution_buttons('paused'))
-        event_bus.execution_resumed.connect(lambda: self.update_execution_buttons('running'))
-        event_bus.execution_stopped.connect(lambda: self.update_execution_buttons('stopped'))
 
         self.logger.info('主窗口初始化完成')
 
@@ -202,42 +196,6 @@ class WorkflowMainWindow(QMainWindow):
         self.logger.info("提示: 从左侧节点库拖拽节点到画布上创建工作流")
         self.logger.info("提示: 使用 F5 执行工作流，F6 验证工作流")
 
-    def execute_workflow(self):
-        """执行工作流"""
-        try:
-            self.logger.info('🔍 开始执行工作流验证...')
-            # 先验证工作流
-            validation_result = self.core_manager.validate_workflow()
-            if validation_result.get('success', False):
-                self.logger.info('✅ 工作流验证通过，开始执行...')
-                self.start_workflow()
-            else:
-                self.logger.error(f'❌ 工作流验证失败: {validation_result.get("message", "未知错误")}')
-                self.logger.warning('💡 提示: 请检查节点连接是否正确')
-        except Exception as e:
-            self.logger.error(f'执行工作流时发生错误: {str(e)}')
-
-    def validate_workflow(self):
-        """验证工作流"""
-        try:
-            self.logger.info('🔍 正在验证工作流...')
-            validation_result = self.core_manager.validate_workflow()
-
-            if validation_result.get('success', False):
-                self.logger.info('✅ 工作流验证通过！')
-                self.logger.info('💡 工作流结构完整，可以执行')
-                # 可以在状态栏显示成功消息
-                self.statusBar().showMessage('工作流验证通过', 3000)
-            else:
-                error_msg = validation_result.get('message', '未知错误')
-                self.logger.error(f'❌ 工作流验证失败: {error_msg}')
-                # 可以在状态栏显示错误消息
-                self.statusBar().showMessage('工作流验证失败', 3000)
-
-        except Exception as e:
-            self.logger.error(f'验证工作流时发生错误: {str(e)}')
-            self.statusBar().showMessage('验证过程中发生错误', 3000)
-
     def show_search_toolbar(self):
         """显示搜索工具栏"""
         self.log_search_bar.open_search()
@@ -344,87 +302,8 @@ class WorkflowMainWindow(QMainWindow):
         self.logger.info('删除选中的节点和连接...')
         self.core_manager.delete_selected()
 
-    def start_workflow(self):
-        """启动工作流"""
-        try:
-            self.logger.info('🚀 开始执行工作流...')
-            self.update_execution_buttons('running')
-            self.core_manager.execute_workflow()
-        except Exception as e:
-            self.logger.error(f'启动工作流失败: {str(e)}')
-            self.update_execution_buttons('idle')
-
-    def pause_workflow(self):
-        """暂停工作流"""
-        try:
-            self.logger.info('⏸️ 暂停工作流执行')
-            self.core_manager.pause_workflow()
-        except Exception as e:
-            self.logger.error(f'暂停工作流失败: {str(e)}')
-
-    def resume_workflow(self):
-        """恢复工作流"""
-        try:
-            self.logger.info('▶️ 恢复工作流执行')
-            self.core_manager.resume_workflow()
-        except Exception as e:
-            self.logger.error(f'恢复工作流失败: {str(e)}')
-
-    def stop_workflow(self):
-        """终止工作流"""
-        try:
-            self.logger.warning('⏹️ 终止工作流执行')
-            self.core_manager.stop_workflow()
-        except Exception as e:
-            self.logger.error(f'终止工作流失败: {str(e)}')
-
     def setup_status_bar(self):
         """设置状态栏"""
         status_bar = self.statusBar()
         status_bar.showMessage('就绪 - 拖拽节点创建工作流')
 
-    def update_execution_buttons(self, state):
-        """根据工作流执行状态更新按钮状态
-
-        Args:
-            state: 'idle', 'running', 'paused', 'stopped'
-        """
-        status_messages = {
-            'idle': '就绪 - 拖拽节点创建工作流',
-            'running': '工作流正在执行中...',
-            'paused': '工作流已暂停',
-            'stopped': '工作流已停止'
-        }
-
-        if state == 'idle':
-            self.start_action.setEnabled(True)
-            self.pause_action.setEnabled(False)
-            self.resume_action.setEnabled(False)
-            self.stop_action.setEnabled(False)
-            self.start_action.setText('▶️\n启动')
-            self.start_action.setStatusTip('启动工作流执行 (F5)')
-        elif state == 'running':
-            self.start_action.setEnabled(False)
-            self.pause_action.setEnabled(True)
-            self.resume_action.setEnabled(False)
-            self.stop_action.setEnabled(True)
-            self.start_action.setText('⏸️\n运行中')
-            self.start_action.setStatusTip('工作流正在运行中...')
-        elif state == 'paused':
-            self.start_action.setEnabled(False)
-            self.pause_action.setEnabled(False)
-            self.resume_action.setEnabled(True)
-            self.stop_action.setEnabled(True)
-            self.start_action.setText('⏸️\n已暂停')
-            self.start_action.setStatusTip('工作流已暂停')
-        elif state == 'stopped':
-            self.start_action.setEnabled(True)
-            self.pause_action.setEnabled(False)
-            self.resume_action.setEnabled(False)
-            self.stop_action.setEnabled(False)
-            self.start_action.setText('▶️\n启动')
-            self.start_action.setStatusTip('启动工作流执行 (F5)')
-
-        # 更新状态栏消息
-        message = status_messages.get(state, '未知状态')
-        self.statusBar().showMessage(message, 0)  # 0表示永久显示，直到下次更新

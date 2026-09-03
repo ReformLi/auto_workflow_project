@@ -84,12 +84,12 @@ def build_menu_bar(window):
 
     execute_action = QAction('执行工作流', window)
     execute_action.setShortcut('F5')
-    execute_action.triggered.connect(window.execute_workflow)
+    execute_action.triggered.connect(window.execution.execute_workflow)
     run_menu.addAction(execute_action)
 
     validate_action = QAction('验证工作流', window)
     validate_action.setShortcut('F6')
-    validate_action.triggered.connect(window.validate_workflow)
+    validate_action.triggered.connect(window.execution.validate_workflow)
     run_menu.addAction(validate_action)
 
     # 工具菜单
@@ -147,24 +147,24 @@ def build_tool_bar(window):
     # 执行控制组 - 这些按钮会根据工作流状态变化
     window.start_action = QAction('▶️\n启动', window)
     window.start_action.setShortcut('F5')
-    window.start_action.triggered.connect(window.start_workflow)
+    window.start_action.triggered.connect(window.execution.start_workflow)
     window.start_action.setStatusTip('启动工作流执行 (F5)')
     tool_bar.addAction(window.start_action)
 
     window.pause_action = QAction('⏸️\n暂停', window)
-    window.pause_action.triggered.connect(window.pause_workflow)
+    window.pause_action.triggered.connect(window.execution.pause_workflow)
     window.pause_action.setStatusTip('暂停工作流执行')
     window.pause_action.setEnabled(False)
     tool_bar.addAction(window.pause_action)
 
     window.resume_action = QAction('⏯️\n恢复', window)
-    window.resume_action.triggered.connect(window.resume_workflow)
+    window.resume_action.triggered.connect(window.execution.resume_workflow)
     window.resume_action.setStatusTip('恢复工作流执行')
     window.resume_action.setEnabled(False)
     tool_bar.addAction(window.resume_action)
 
     window.stop_action = QAction('⏹️\n终止', window)
-    window.stop_action.triggered.connect(window.stop_workflow)
+    window.stop_action.triggered.connect(window.execution.stop_workflow)
     window.stop_action.setStatusTip('终止工作流执行')
     window.stop_action.setEnabled(False)
     tool_bar.addAction(window.stop_action)
@@ -173,7 +173,7 @@ def build_tool_bar(window):
     tool_bar.addSeparator()
     window.validate_action = QAction('✓\n验证', window)
     window.validate_action.setShortcut('F6')
-    window.validate_action.triggered.connect(window.validate_workflow)
+    window.validate_action.triggered.connect(window.execution.validate_workflow)
     window.validate_action.setStatusTip('验证工作流 (F6)')
     tool_bar.addAction(window.validate_action)
 
@@ -184,4 +184,5 @@ def build_tool_bar(window):
     window.search_log_action.triggered.connect(window.show_search_toolbar)
     window.search_log_action.setStatusTip('搜索日志 (Ctrl+F)')
     tool_bar.addAction(window.search_log_action)
+
 
