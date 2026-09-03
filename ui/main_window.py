@@ -19,6 +19,7 @@ from app.config import WINDOW_HEIGHT, WINDOW_WIDTH
 from core.events import event_bus
 from core.manager import CoreManager
 from ui.log_panel import TextEditHandler
+from ui.log_search_bar import LogSearchBar
 from ui.node_graph_panel import NodeGraphPanel
 from ui.nodes_panel import NodeLibraryWidget
 from ui.styles import ThemeManager
@@ -333,16 +334,18 @@ class WorkflowMainWindow(QMainWindow):
         log_layout.setContentsMargins(0, 0, 0, 0)
         log_layout.setSpacing(0)
 
-        # 创建搜索工具栏
-        self.setup_log_search_toolbar(log_container)
-        log_layout.addWidget(self.log_search_toolbar)
-
         # 创建日志文本框
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setFont(QFont('Courier New', 10))
         self.log_text.setLineWrapMode(QTextEdit.NoWrap)  # 禁用自动换行，保持日志格式
         # 样式将在apply_theme中设置
+
+        # 创建搜索工具栏（位于日志文本框上方）
+        self.log_search_bar = LogSearchBar(self.log_text, self.theme_manager)
+        self.log_search_bar.closed.connect(self._on_log_search_closed)
+        log_layout.addWidget(self.log_search_bar)
+
         log_layout.addWidget(self.log_text)
 
         log_dock.setWidget(log_container)
@@ -486,112 +489,12 @@ class WorkflowMainWindow(QMainWindow):
 
     def show_search_toolbar(self):
         """显示搜索工具栏"""
-        self.log_search_toolbar.setVisible(True)
-        self.log_search_box.setFocus()
+        self.log_search_bar.open_search()
         self.search_log_action.setEnabled(False)
 
-    def hide_search_toolbar(self):
-        """隐藏搜索工具栏"""
-        self.log_search_toolbar.setVisible(False)
-        self.log_search_box.clear()
+    def _on_log_search_closed(self):
+        """搜索栏关闭后恢复搜索按钮"""
         self.search_log_action.setEnabled(True)
-        self.clear_search_highlights()
-
-    def search_logs(self, search_text):
-        """搜索日志内容"""
-        if not search_text:
-            self.clear_search_highlights()
-            self.search_count_label.setText("0/0")
-            return
-
-        # 清除之前的高亮
-        self.clear_search_highlights()
-
-        # 搜索匹配项
-        cursor = self.log_text.textCursor()
-        cursor.movePosition(cursor.Start)
-
-        self.search_matches = []
-        format = QTextCharFormat()
-        format.setBackground(QColor('#ffa502'))  # 橙色高亮
-        format.setForeground(QColor('#000000'))  # 黑色文本
-
-        while True:
-            cursor = self.log_text.document().find(search_text, cursor)
-            if cursor.isNull():
-                break
-            # 保存匹配位置
-            self.search_matches.append(cursor.position())
-            # 高亮匹配项
-            cursor.movePosition(cursor.NoMove, cursor.KeepAnchor, len(search_text))
-            self.log_text.setTextCursor(cursor)
-            cursor.mergeCharFormat(format)
-            cursor.clearSelection()
-
-        # 更新计数显示
-        total_matches = len(self.search_matches)
-        if total_matches > 0:
-            self.current_match_index = 0
-            self.highlight_current_match()
-            self.search_count_label.setText(f"{self.current_match_index + 1}/{total_matches}")
-        else:
-            self.current_match_index = -1
-            self.search_count_label.setText("0/0")
-
-    def clear_search_highlights(self):
-        """清除搜索高亮"""
-        cursor = self.log_text.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.End, cursor.KeepAnchor)
-        format = QTextCharFormat()
-        format.clearBackground()
-        cursor.mergeCharFormat(format)
-        self.search_matches = []
-        self.current_match_index = -1
-
-    def highlight_current_match(self):
-        """高亮当前匹配项"""
-        if not self.search_matches or self.current_match_index < 0:
-            return
-
-        # 移除之前的高亮
-        cursor = self.log_text.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.End, cursor.KeepAnchor)
-        format = QTextCharFormat()
-        format.clearBackground()
-        cursor.mergeCharFormat(format)
-
-        # 高亮当前匹配项
-        cursor.setPosition(self.search_matches[self.current_match_index])
-        cursor.movePosition(cursor.Right, cursor.KeepAnchor, len(self.log_search_box.text()))
-        format.setBackground(QColor('#ffa502'))
-        format.setForeground(QColor('#000000'))
-        cursor.mergeCharFormat(format)
-
-        # 滚动到匹配项
-        self.log_text.setTextCursor(cursor)
-        self.log_text.ensureCursorVisible()
-
-    def search_next(self):
-        """查找下一个匹配项"""
-        if not self.search_matches:
-            return
-
-        self.current_match_index = (self.current_match_index + 1) % len(self.search_matches)
-        total_matches = len(self.search_matches)
-        self.search_count_label.setText(f"{self.current_match_index + 1}/{total_matches}")
-        self.highlight_current_match()
-
-    def search_previous(self):
-        """查找上一个匹配项"""
-        if not self.search_matches:
-            return
-
-        self.current_match_index = (self.current_match_index - 1) % len(self.search_matches)
-        total_matches = len(self.search_matches)
-        self.search_count_label.setText(f"{self.current_match_index + 1}/{total_matches}")
-        self.highlight_current_match()
 
     def show_settings(self):
         """显示设置对话框"""
@@ -619,8 +522,8 @@ class WorkflowMainWindow(QMainWindow):
         self.log_text.setStyleSheet(self.theme_manager.get_stylesheet('log_text_edit'))
 
         # 更新搜索工具栏样式
-        if hasattr(self, 'log_search_toolbar'):
-            self.log_search_toolbar.setStyleSheet(self.theme_manager.get_stylesheet('search_toolbar'))
+        if hasattr(self, 'log_search_bar'):
+            self.log_search_bar.apply_theme(self.theme_manager)
 
         # 更新节点库主题
         if hasattr(self, 'node_library'):
@@ -723,102 +626,6 @@ class WorkflowMainWindow(QMainWindow):
             self.core_manager.stop_workflow()
         except Exception as e:
             self.logger.error(f'终止工作流失败: {str(e)}')
-
-    def setup_log_search_toolbar(self, parent):
-        """设置日志搜索工具栏"""
-        self.log_search_toolbar = QToolBar()
-        self.log_search_toolbar.setStyleSheet(self.theme_manager.get_stylesheet('search_toolbar'))
-        self.log_search_toolbar.setMovable(False)
-        self.log_search_toolbar.setVisible(False)  # 默认隐藏
-
-        # 搜索框
-        self.log_search_box = QLineEdit()
-        self.log_search_box.setPlaceholderText("搜索日志...")
-        self.log_search_box.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {self.theme_manager.colors['primary_bg']};
-                color: {self.theme_manager.colors['text_primary']};
-                border: 1px solid {self.theme_manager.colors['border']};
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 200px;
-            }}
-        """)
-        self.log_search_box.textChanged.connect(self.search_logs)
-
-        # 搜索结果计数标签
-        self.search_count_label = QLabel("0/0")
-        self.search_count_label.setStyleSheet(f"color: {self.theme_manager.colors['text_secondary']}; font-size: 11px;")
-        self.search_count_label.setMinimumWidth(40)
-
-        # 上一个按钮
-        self.search_prev_btn = QToolButton()
-        self.search_prev_btn.setText("↑")
-        self.search_prev_btn.setToolTip("上一个匹配项")
-        self.search_prev_btn.setStyleSheet(f"""
-            QToolButton {{
-                background-color: {self.theme_manager.colors['button_bg']};
-                color: {self.theme_manager.colors['text_primary']};
-                border: 1px solid {self.theme_manager.colors['border_light']};
-                border-radius: 4px;
-                padding: 4px;
-                min-width: 30px;
-            }}
-            QToolButton:hover {{
-                background-color: {self.theme_manager.colors['button_hover']};
-            }}
-        """)
-        self.search_prev_btn.clicked.connect(self.search_previous)
-
-        # 下一个按钮
-        self.search_next_btn = QToolButton()
-        self.search_next_btn.setText("↓")
-        self.search_next_btn.setToolTip("下一个匹配项")
-        self.search_next_btn.setStyleSheet(f"""
-            QToolButton {{
-                background-color: {self.theme_manager.colors['button_bg']};
-                color: {self.theme_manager.colors['text_primary']};
-                border: 1px solid {self.theme_manager.colors['border_light']};
-                border-radius: 4px;
-                padding: 4px;
-                min-width: 30px;
-            }}
-            QToolButton:hover {{
-                background-color: {self.theme_manager.colors['button_hover']};
-            }}
-        """)
-        self.search_next_btn.clicked.connect(self.search_next)
-
-        # 关闭搜索按钮
-        self.search_close_btn = QToolButton()
-        self.search_close_btn.setText("✕")
-        self.search_close_btn.setToolTip("关闭搜索")
-        self.search_close_btn.setStyleSheet(f"""
-            QToolButton {{
-                background-color: {self.theme_manager.colors['button_bg']};
-                color: {self.theme_manager.colors['text_primary']};
-                border: 1px solid {self.theme_manager.colors['border_light']};
-                border-radius: 4px;
-                padding: 4px;
-                min-width: 30px;
-            }}
-            QToolButton:hover {{
-                background-color: {self.theme_manager.colors['error']};
-                border-color: {self.theme_manager.colors['critical']};
-            }}
-        """)
-        self.search_close_btn.clicked.connect(self.hide_search_toolbar)
-
-        # 添加到工具栏
-        self.log_search_toolbar.addWidget(self.log_search_box)
-        self.log_search_toolbar.addWidget(self.search_count_label)
-        self.log_search_toolbar.addWidget(self.search_prev_btn)
-        self.log_search_toolbar.addWidget(self.search_next_btn)
-        self.log_search_toolbar.addWidget(self.search_close_btn)
-
-        # 搜索相关变量
-        self.search_matches = []
-        self.current_match_index = -1
 
     def setup_status_bar(self):
         """设置状态栏"""
