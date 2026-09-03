@@ -18,3 +18,6 @@ pywin32==311
 # pyuac==0.0.3
 # 剪贴板依赖 pip install pyperclip
 pyperclip==1.11.0
+
+# 使用 loguru 记录异常信息
+# pip install loguru
