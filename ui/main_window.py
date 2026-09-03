@@ -19,6 +19,7 @@ from app.config import WINDOW_HEIGHT, WINDOW_WIDTH
 from core.events import event_bus
 from core.manager import CoreManager
 from ui.actions import build_menu_bar, build_tool_bar
+from ui.file_actions import FileActions
 from ui.log_panel import TextEditHandler
 from ui.log_search_bar import LogSearchBar
 from ui.node_graph_panel import NodeGraphPanel
@@ -44,6 +45,10 @@ class WorkflowMainWindow(QMainWindow):
         # 设置样式
         self.setStyleSheet(self.theme_manager.get_stylesheet('main_window'))
         self.core_manager = CoreManager()
+
+        # 控制器（先于 UI 创建，菜单/工具栏构建时需要绑定其方法）
+        self.file_actions = FileActions(self)
+
         # 初始化 UI
         self.setup_ui()
         self.setup_logging()
@@ -196,78 +201,6 @@ class WorkflowMainWindow(QMainWindow):
         self.logger.debug("调试模式已启用")
         self.logger.info("提示: 从左侧节点库拖拽节点到画布上创建工作流")
         self.logger.info("提示: 使用 F5 执行工作流，F6 验证工作流")
-
-    def new_workflow(self):
-        """新建工作流"""
-        # 检查当前是否有未保存的更改
-        # 可选：询问用户是否保存
-        self.logger.info('开始新建工作流...')
-        reply = QMessageBox.question(
-            self, '新建工作流',
-            '是否保存当前工作流？',
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
-        )
-        if reply == QMessageBox.Cancel:
-            return
-        if reply == QMessageBox.Yes:
-            if not self.save_workflow():  # 如果保存失败则取消新建
-                return
-
-        # 清空节点图
-        self.core_manager.new_workflow()
-        # 清除当前文件记录
-        if hasattr(self, 'current_file'):
-            delattr(self, 'current_file')
-        self.logger.info('新建工作流')
-
-    def open_workflow(self):
-        """打开工作流"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, '打开工作流文件', '', 'JSON文件 (*.json);;所有文件 (*.*)'
-        )
-        if file_path:
-            try:
-                if self.core_manager.load_workflow(file_path):
-                    self.current_file = file_path
-                    self.logger.info(f'打开工作流文件: {file_path}')
-                else:
-                    self.logger.error(f'打开文件失败:无法加载')
-            except Exception as e:
-                self.logger.error(f'打开文件失败: {str(e)}')
-
-    def save_workflow(self):
-        """保存工作流"""
-        if not hasattr(self, 'current_file') or not self.current_file:
-            return self.save_workflow_as()
-        try:
-            if self.core_manager.save_workflow(self.current_file):
-                self.logger.info(f'保存工作流到: {self.current_file}')
-                return True
-        except Exception as e:
-            self.logger.error(f'保存文件失败: {str(e)}')
-        return False
-
-    def save_workflow_as(self):
-        """另存为工作流"""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, '保存工作流文件', '', 'JSON文件 (*.json);;所有文件 (*.*)'
-        )
-        if file_path:
-            self.current_file = file_path
-            return self.save_workflow()
-        return False
-
-    def clear_workflow(self):
-        """清空工作流"""
-        self.logger.info('开始清空工作流...')
-        reply = QMessageBox.question(
-            self, '清空工作流',
-            '确认清空当前工作流？',
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.core_manager.clear_all()
-            self.logger.info('清空工作流')
 
     def execute_workflow(self):
         """执行工作流"""

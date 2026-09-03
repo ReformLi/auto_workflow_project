@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 actions.py
 功能描述: 菜单栏与工具栏的纯结构构建（不含业务逻辑，命令统一绑定到主窗口）
@@ -16,22 +16,22 @@ def build_menu_bar(window):
 
     new_action = QAction('新建', window)
     new_action.setShortcut('Ctrl+N')
-    new_action.triggered.connect(window.new_workflow)
+    new_action.triggered.connect(window.file_actions.new_workflow)
     file_menu.addAction(new_action)
 
     open_action = QAction('打开', window)
     open_action.setShortcut('Ctrl+O')
-    open_action.triggered.connect(window.open_workflow)
+    open_action.triggered.connect(window.file_actions.open_workflow)
     file_menu.addAction(open_action)
 
     save_action = QAction('保存', window)
     save_action.setShortcut('Ctrl+S')
-    save_action.triggered.connect(window.save_workflow)
+    save_action.triggered.connect(window.file_actions.save_workflow)
     file_menu.addAction(save_action)
 
     save_as_action = QAction('另存为', window)
     save_as_action.setShortcut('Ctrl+Shift+S')
-    save_as_action.triggered.connect(window.save_workflow_as)
+    save_as_action.triggered.connect(window.file_actions.save_workflow_as)
     file_menu.addAction(save_as_action)
 
     file_menu.addSeparator()
@@ -76,7 +76,7 @@ def build_menu_bar(window):
     edit_menu.addSeparator()
 
     clear_action = QAction('清空', window)
-    clear_action.triggered.connect(window.clear_workflow)
+    clear_action.triggered.connect(window.file_actions.clear_workflow)
     edit_menu.addAction(clear_action)
 
     # 运行菜单
@@ -118,19 +118,19 @@ def build_tool_bar(window):
     # 文件操作组
     new_action = QAction('📄\n新建', window)
     new_action.setShortcut('Ctrl+N')
-    new_action.triggered.connect(window.new_workflow)
+    new_action.triggered.connect(window.file_actions.new_workflow)
     new_action.setStatusTip('新建工作流 (Ctrl+N)')
     tool_bar.addAction(new_action)
 
     open_action = QAction('📂\n打开', window)
     open_action.setShortcut('Ctrl+O')
-    open_action.triggered.connect(window.open_workflow)
+    open_action.triggered.connect(window.file_actions.open_workflow)
     open_action.setStatusTip('打开工作流文件 (Ctrl+O)')
     tool_bar.addAction(open_action)
 
     save_action = QAction('💾\n保存', window)
     save_action.setShortcut('Ctrl+S')
-    save_action.triggered.connect(window.save_workflow)
+    save_action.triggered.connect(window.file_actions.save_workflow)
     save_action.setStatusTip('保存工作流 (Ctrl+S)')
     tool_bar.addAction(save_action)
 
@@ -138,7 +138,7 @@ def build_tool_bar(window):
 
     # 编辑操作组
     clear_action = QAction('🗑️\n清空', window)
-    clear_action.triggered.connect(window.clear_workflow)
+    clear_action.triggered.connect(window.file_actions.clear_workflow)
     clear_action.setStatusTip('清空当前工作流')
     tool_bar.addAction(clear_action)
 
@@ -184,3 +184,4 @@ def build_tool_bar(window):
     window.search_log_action.triggered.connect(window.show_search_toolbar)
     window.search_log_action.setStatusTip('搜索日志 (Ctrl+F)')
     tool_bar.addAction(window.search_log_action)
+
