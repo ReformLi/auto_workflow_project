@@ -60,13 +60,15 @@ QLabel[role="dim"] {{
 }}
 
 /* ══════════════ 菜单栏 ══════════════ */
+/* 注意：不要给 QMenuBar 写 height —— 它会强制控件高度，
+   而 ::item 的 padding 使菜单项实际需要约 32px，项比栏高会把文字裁到可视区外
+   （表现为一条空白菜单栏）。这里让菜单栏按内容自适应高度。 */
 QMenuBar {{
     background-color: {BG_PANEL};
     color: {TEXT2};
     border-bottom: 1px solid {BORDER};
     padding: 2px 6px;
     spacing: 2px;
-    height: 26px;
 }}
 QMenuBar::item {{
     background-color: transparent;
