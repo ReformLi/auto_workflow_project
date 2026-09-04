@@ -12,6 +12,7 @@ import weakref
 from abc import ABC, abstractmethod
 
 from NodeGraphQt import BaseNode
+from NodeGraphQt.constants import NodePropWidgetEnum
 from PyQt5 import QtWidgets, QtGui
 
 from ui import icons, tokens
@@ -56,6 +57,9 @@ class WorkflowNode(BaseNode, ABC):
         )
         self.status_text.setDefaultTextColor(QtGui.QColor(tokens.DARK['text']))
         self.status_text.setVisible(False)
+
+        # 属性定义（供节点属性页渲染；不入节点体，节点图只显示节点本身）
+        self._prop_defs = []
 
     def _apply_visual_style(self):
         """按 NODE_CATEGORY / NODE_ICON 应用节点头部色与图标"""
@@ -125,3 +129,45 @@ class WorkflowNode(BaseNode, ABC):
     @classmethod
     def is_end_node(cls) -> bool:
         return False
+
+    # ========== 属性定义（节点属性页用，不入节点体） ==========
+    def add_text_input(self, name, label='', text='', placeholder_text='',
+                       tooltip=None, tab=None):
+        """注册一个文本属性到节点模型（不内嵌到节点体，仅在属性页展示）。"""
+        self.create_property(
+            name, value=text,
+            widget_type=NodePropWidgetEnum.QLINE_EDIT.value,
+            widget_tooltip=tooltip, tab=tab)
+        self._prop_defs.append({
+            'name': name, 'label': label or name, 'kind': 'text',
+            'value': text, 'items': None, 'capture': False,
+        })
+
+    def add_combo_menu(self, name, label='', items=None, tooltip=None, tab=None):
+        """注册一个下拉选择属性到节点模型（不内嵌到节点体，仅在属性页展示）。"""
+        items = items or []
+        self.create_property(
+            name, value=items[0] if items else None, items=items,
+            widget_type=NodePropWidgetEnum.QCOMBO_BOX.value,
+            widget_tooltip=tooltip, tab=tab)
+        self._prop_defs.append({
+            'name': name, 'label': label or name, 'kind': 'combo',
+            'value': items[0] if items else None, 'items': items,
+            'capture': False,
+        })
+
+    def mark_property_capture(self, name):
+        """把指定属性标记为支持'捕获'（在属性页对应输入框旁渲染捕获按钮）。"""
+        for d in self._prop_defs:
+            if d['name'] == name:
+                d['capture'] = True
+                return
+
+    def get_property_defs(self):
+        """返回节点的声明式属性定义列表，供节点属性页渲染。"""
+        # 同步模型中的最新值（属性可在外部被赋值）
+        for d in self._prop_defs:
+            val = self.get_property(d['name'])
+            if val is not None:
+                d['value'] = val
+        return list(self._prop_defs)

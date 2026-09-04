@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import QWidget, QMenu
 from NodeGraphQt.constants import PipeLayoutEnum, ViewerEnum
 from core.events import event_bus
 from ui import icons, tokens
+from ui.node_properties_dialog import NodePropertiesDialog
 from ui.theme import ThemeState
 
 
@@ -48,6 +49,11 @@ class NodeGraphPanel(QWidget):
         self._pipe_timer.setInterval(60)
         self._pipe_timer.timeout.connect(self.refresh_pipe_colors)
         event_bus.graph_changed.connect(self._pipe_timer.start)
+
+        # 属性页弹窗：双击节点 / 右键→属性 唤醒
+        self._prop_dialogs = []
+        self.graph_manager.node_graph.node_double_clicked.connect(
+            self._on_node_double_clicked)
 
     def get_widget(self):
         return self.core_manager.get_widget()
@@ -121,12 +127,16 @@ class NodeGraphPanel(QWidget):
         fallback = QtGui.QColor(tokens.DARK['text_2nd'])
         return fallback.red(), fallback.green(), fallback.blue(), 200
 
-    # ── 右键菜单（两级：分类 → 节点） ───────────────────
+    # ── 右键菜单（节点 → 属性；空白 → 分类建节点） ─────────
     def on_view_context_menu(self, pos):
-        """处理视图右键菜单：按分类分组的二级菜单"""
+        """处理视图右键菜单：命中节点显示节点菜单（属性），否则按分类分组的二级菜单"""
         scene_pos = self.view.mapToScene(pos)
-        menu = QMenu(self.view)
+        node = self._node_at(scene_pos)
+        if node is not None:
+            self._show_node_menu(node, pos)
+            return
 
+        menu = QMenu(self.view)
         for label, entry in self._group_by_category(self.core_manager.get_available_nodes()):
             submenu = menu.addMenu(icons.icon(entry['icon'], color=entry['color']), label)
             for node in entry['nodes']:
@@ -147,6 +157,44 @@ class NodeGraphPanel(QWidget):
                 event_bus.node_dropped.emit(node_type, scene_pos)
         except Exception as e:
             self.logger.error(f"右键创建节点失败: {str(e)}")
+
+    def _node_at(self, scene_pos):
+        """返回场景坐标处的节点对象（未命中返回 None）"""
+        try:
+            items = self.view._items_near(scene_pos)
+            if not items:
+                return None
+            for node in self.graph_manager.node_graph.all_nodes():
+                if node.view in items:
+                    return node
+        except Exception:
+            return None
+        return None
+
+    def _show_node_menu(self, node, view_pos):
+        """显示节点右键菜单（属性）"""
+        menu = QMenu(self.view)
+        prop_action = menu.addAction(icons.icon('fa5s.edit', color='#4c8dff'), '属性')
+        action = menu.exec_(self.view.mapToGlobal(view_pos))
+        if action is prop_action:
+            self._open_properties(node)
+
+    def _on_node_double_clicked(self, node):
+        """双击节点 → 打开属性页"""
+        self._open_properties(node)
+
+    def _open_properties(self, node):
+        """打开节点属性页弹窗（保持引用避免被回收）"""
+        try:
+            node_type = getattr(node, 'type_', '')
+            self.logger.info(f"打开节点属性: {getattr(node, 'name', lambda: node_type)()}")
+        except Exception:
+            pass
+        dialog = NodePropertiesDialog(node, parent=self.window())
+        self._prop_dialogs.append(dialog)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     @staticmethod
     def _group_by_category(nodes_info):
