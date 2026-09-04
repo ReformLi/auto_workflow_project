@@ -1,174 +1,132 @@
 # -*- coding: utf-8 -*-
 """
-log_editor.py
-作者: reformLi
-创建日期: 2026/3/24
-最后修改: 2026/3/24
-版本: 1.0.0
-
-功能描述: 日志窗口
-"""
-
-# -*- coding: utf-8 -*-
-"""
-log_editor.py
-作者: reformLi
-创建日期: 2026/3/24
-最后修改: 2026/4/29
-版本: 1.1.0
-
-功能描述: 支持主题切换的彩色日志窗口
+log_panel.py
+功能描述: 日志窗口处理器——把 logging 记录以「时间戳 + 级别徽章 + 正文」的三段式
+         彩色格式写入 QTextEdit，支持级别过滤与最大行数裁剪
+         （见 UI_DESIGN.md §5.5）
 """
 
 import logging
 from datetime import datetime
-from PyQt5.QtGui import QTextCharFormat, QColor, QFont, QTextCursor
 
-from ui.styles import ThemeManager
+from PyQt5.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
+
+from ui import tokens
+
+# 级别 → (徽章色 token, 正文是否用级别色强调)
+_LEVEL_STYLE = {
+    logging.DEBUG:    ('text_dim', False),
+    logging.INFO:     ('info',     False),
+    logging.WARNING:  ('warning',  False),
+    logging.ERROR:    ('error',    True),
+    logging.CRITICAL: ('error',    True),
+}
+
+_LEVEL_NAMES = {
+    logging.DEBUG: 'DEBUG',
+    logging.INFO: 'INFO',
+    logging.WARNING: 'WARN',
+    logging.ERROR: 'ERROR',
+    logging.CRITICAL: 'CRIT',
+}
+
+DEFAULT_MAX_LINES = 5000
 
 
 class TextEditHandler(logging.Handler):
-    """自定义日志处理器，将日志输出到QTextEdit，支持主题切换后更新已显示日志的颜色"""
+    """把日志写入 QTextEdit 的处理器（支持级别过滤、行数上限、缓存重绘）"""
 
-    def __init__(self, text_edit, theme_manager=None):
+    def __init__(self, text_edit, max_lines=DEFAULT_MAX_LINES):
         super().__init__()
         self.text_edit = text_edit
-        self.theme_manager = theme_manager or ThemeManager()
+        self.max_lines = max_lines
 
-        # 日志记录缓存： (time_str, levelno, levelname, message)
+        # 记录缓存：(time_str, levelno, message)
         self.log_records = []
+        self._level_filter = logging.NOTSET   # NOTSET = 显示全部
 
-        # 设置初始格式和颜色集
-        self.setup_formats()
-        self.setup_colors()
+    # ── 颜色 ────────────────────────────────────────────
+    @staticmethod
+    def _color(key):
+        return QColor(tokens.DARK[key])
 
-        # 监听主题变化信号（假设 ThemeManager 有 themeChanged 信号）
-        if hasattr(self.theme_manager, 'themeChanged'):
-            self.theme_manager.themeChanged.connect(self.on_theme_changed)
-
-    def setup_formats(self):
-        """设置不同日志级别的文本格式（用于消息文本）"""
-        if self.theme_manager.current_theme == 'light':
-            self.formats = {
-                logging.DEBUG: self.create_format('#666666', italic=True),
-                logging.INFO: self.create_format('#0066cc'),
-                logging.WARNING: self.create_format('#ff8800', bold=True),
-                logging.ERROR: self.create_format('#cc0000', bold=True),
-                logging.CRITICAL: self.create_format('#aa0000', bold=True),
-            }
-        else:   # dark 主题
-            self.formats = {
-                logging.DEBUG: self.create_format('#888888', italic=True),
-                logging.INFO: self.create_format('#ffffff'),
-                logging.WARNING: self.create_format('#ffcc00', bold=True),
-                logging.ERROR: self.create_format('#ff6b6b', bold=True),
-                logging.CRITICAL: self.create_format('#ff0000', bold=True),
-            }
-
-    def setup_colors(self):
-        """设置级别标签、时间戳的颜色（同样跟随主题）"""
-        if self.theme_manager.current_theme == 'light':
-            self.level_colors = {
-                logging.DEBUG: '#666666',
-                logging.INFO: '#0066cc',
-                logging.WARNING: '#ff8800',
-                logging.ERROR: '#cc0000',
-                logging.CRITICAL: '#aa0000'
-            }
-            self.timestamp_color = '#999999'
-            self.separator_color = '#aaaaaa'
-        else:
-            self.level_colors = {
-                logging.DEBUG: '#888888',
-                logging.INFO: '#00ff00',
-                logging.WARNING: '#ffcc00',
-                logging.ERROR: '#ff6b6b',
-                logging.CRITICAL: '#ff0000'
-            }
-            self.timestamp_color = '#666666'
-            self.separator_color = '#555555'
-
-    def create_format(self, color, bold=False, italic=False):
-        """创建指定颜色的 QTextCharFormat"""
+    def create_format(self, color_key, bold=False, italic=False):
+        """创建指定 tokens 色的字符格式"""
         fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
+        fmt.setForeground(self._color(color_key))
         if bold:
             fmt.setFontWeight(QFont.Bold)
         if italic:
             fmt.setFontItalic(True)
         return fmt
 
+    # ── 写入 ────────────────────────────────────────────
     def emit(self, record):
-        """接收日志记录，插入到文本框并缓存"""
+        """接收日志记录，按当前过滤条件插入文本框并缓存"""
         try:
             msg = self.format(record)
-            levelno = record.levelno
-            levelname = record.levelname
             created = datetime.fromtimestamp(record.created)
             time_str = created.strftime('%H:%M:%S')
 
-            # 缓存记录（便于主题切换时重绘）
-            self.log_records.append((time_str, levelno, levelname, msg))
+            self.log_records.append((time_str, record.levelno, msg))
+            self._trim_cache()
 
-            # 插入当前主题的彩色日志
-            self._insert_log(time_str, levelno, levelname, msg)
-
+            if self._level_filter is not logging.NOTSET and record.levelno < self._level_filter:
+                return
+            self._insert_log(time_str, record.levelno, msg)
         except Exception:
             self.handleError(record)
 
-    def _insert_log(self, time_str, levelno, levelname, msg):
-        """在文本框末尾插入一条日志（使用当前主题颜色）"""
+    def _insert_log(self, time_str, levelno, msg):
+        """插入一条日志：时间戳(暗) + 级别徽章(级别色加粗) + 正文"""
+        badge_key, emphasize = _LEVEL_STYLE.get(levelno, ('text', False))
+        body_key = badge_key if emphasize else 'text'
+
         cursor = self.text_edit.textCursor()
         cursor.movePosition(QTextCursor.End)
 
-        # 时间戳
-        time_fmt = self.create_format(self.timestamp_color)
-        cursor.insertText(f'[{time_str}] ', time_fmt)
+        cursor.insertText(f'[{time_str}] ', self.create_format('text_dim'))
+        cursor.insertText(f'{_LEVEL_NAMES.get(levelno, "LOG"):<5} ',
+                          self.create_format(badge_key, bold=True))
+        cursor.insertText(f'{msg}\n', self.create_format(body_key))
 
-        # 级别标签
-        level_color = self.level_colors.get(levelno, '#ffffff')
-        level_fmt = self.create_format(level_color, bold=True)
-        cursor.insertText(f'{levelname:8}', level_fmt)
-
-        # 分隔符
-        sep_fmt = self.create_format(self.separator_color)
-        cursor.insertText(' | ', sep_fmt)
-
-        # 消息内容
-        msg_fmt = self.formats.get(levelno, self.formats[logging.INFO])
-        cursor.insertText(f'{msg}\n', msg_fmt)
-
-        # 滚动到底部
         self.text_edit.setTextCursor(cursor)
         self.text_edit.ensureCursorVisible()
 
-    def refresh(self):
-        """清空文本框，用当前主题颜色重新插入所有缓存的日志"""
-        self.text_edit.clear()
-        # 临时屏蔽信号，避免重复记录（如果 text_edit 内容改变有信号）
-        # 理论上不会触发 emit，但以防万一
-        old_records = self.log_records.copy()
-        self.log_records = []   # 清空缓存，防止 emit 重复添加
-
-        for time_str, levelno, levelname, msg in old_records:
-            # 重新缓存（因为下面 _insert_log 不会触发 emit，手动添加）
-            self.log_records.append((time_str, levelno, levelname, msg))
-            self._insert_log(time_str, levelno, levelname, msg)
-
-    def on_theme_changed(self):
-        """主题变化时的槽函数，更新颜色配置并刷新显示"""
-        # self.setup_formats()
-        # self.setup_colors()
+    # ── 过滤 / 重绘 ─────────────────────────────────────
+    def set_level_filter(self, levelno):
+        """设置最低显示级别（logging.NOTSET 或 None 表示全部）"""
+        self._level_filter = levelno if levelno is not None else logging.NOTSET
         self.refresh()
 
-    # def update_theme(self, theme_name):
-    #     """
-    #     手动切换主题时调用（若 ThemeManager 无信号或需要外部手动控制）
-    #     usage: handler.update_theme('dark')
-    #     """
-    #     if self.theme_manager:
-    #         self.theme_manager.current_theme = theme_name
-    #     self.on_theme_changed(theme_name)
+    def level_filter(self):
+        return self._level_filter
+
+    def refresh(self):
+        """按当前过滤条件重绘全部缓存日志"""
+        self.text_edit.clear()
+        for time_str, levelno, msg in self.log_records:
+            if self._level_filter is not logging.NOTSET and levelno < self._level_filter:
+                continue
+            self._insert_log(time_str, levelno, msg)
+
+    def clear_logs(self):
+        """清空日志（缓存与显示一起清）"""
+        self.log_records = []
+        self.text_edit.clear()
+
+    # ── 行数上限 ────────────────────────────────────────
+    def set_max_lines(self, max_lines):
+        """设置最大保留行数（None/0 表示不限制）"""
+        self.max_lines = max_lines or 0
+        self._trim_cache()
+        self.refresh()
+
+    def _trim_cache(self):
+        if self.max_lines and len(self.log_records) > self.max_lines:
+            self.log_records = self.log_records[-self.max_lines:]
+            # 同步裁剪文档，避免控件内存无限增长
+            self.text_edit.document().setMaximumBlockCount(self.max_lines + 50)
 
     def flush(self):
         pass

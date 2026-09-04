@@ -14,6 +14,7 @@ class EndNode(WorkflowNode):
     """结束节点"""
     __identifier__ = 'workflow'
     NODE_NAME = '结束'
+    NODE_CATEGORY = '结束'
 
     def __init__(self):
         super(EndNode, self).__init__()

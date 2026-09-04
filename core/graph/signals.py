@@ -6,6 +6,8 @@ signals.py
 import logging
 from contextlib import contextmanager
 
+from core.events import event_bus
+
 
 class GraphSignalManager:
     """集中管理 node_graph 的四个结构信号：
@@ -62,11 +64,19 @@ class GraphSignalManager:
         self.disconnect_all()
 
     # --------------- 日志回调 ---------------
+    def _notify_graph_changed(self):
+        """向 UI 广播图结构变更（发射失败不影响日志回调）"""
+        try:
+            event_bus.graph_changed.emit()
+        except Exception as e:
+            self.logger.debug(f"graph_changed 发射失败: {e}")
+
     def on_node_created(self, node):
         try:
             self.logger.info(f'创建节点: {node.name()}')
         except Exception as e:
             self.logger.debug(f"节点创建回调异常: {e}")
+        self._notify_graph_changed()
 
     def on_node_deleted(self, node):
         try:
@@ -75,6 +85,7 @@ class GraphSignalManager:
                 self.logger.info(f'删除节点: {node.name()}')
         except Exception:
             self.logger.info('删除节点（无法获取名称）')
+        self._notify_graph_changed()
 
     def on_node_connected(self, src_port, trg_port):
         try:
@@ -83,6 +94,7 @@ class GraphSignalManager:
             self.logger.info(f'连接节点: {src_node} -> {trg_node}')
         except Exception as e:
             self.logger.debug(f"连接回调异常: {e}")
+        self._notify_graph_changed()
 
     def on_node_disconnected(self, src_port, trg_port):
         try:
@@ -91,3 +103,4 @@ class GraphSignalManager:
             self.logger.info(f'断开节点: {src_node} -> {trg_node}')
         except Exception as e:
             self.logger.debug(f"断开回调异常: {e}")
+        self._notify_graph_changed()

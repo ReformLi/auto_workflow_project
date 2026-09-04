@@ -11,6 +11,7 @@ from PyQt5.QtCore import Qt
 
 from app.config import APP_NAME, APP_VERSION
 from ui.main_window import WorkflowMainWindow
+from ui import qss
 from app.logger import setup_logging
 
 
@@ -23,6 +24,10 @@ def main():
     # 设置应用程序信息
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+
+    # 全局字体 + 全局样式表（唯一 QSS 入口，见 UI_DESIGN.md §6）
+    qss.apply_font(app)
+    app.setStyleSheet(qss.build_qss())
 
     # 设置高DPI支持
     if hasattr(Qt, 'AA_EnableHighDpiScaling'):

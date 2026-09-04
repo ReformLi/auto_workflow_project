@@ -13,6 +13,7 @@ from nodes.base_node import WorkflowNode
 class WhileLoopNode(WorkflowNode):
     __identifier__ = 'workflow'
     NODE_NAME = '循环判断'
+    NODE_CATEGORY = '循环'
 
     def __init__(self):
         super().__init__()
@@ -58,6 +59,8 @@ class WhileLoopNode(WorkflowNode):
 class DoLoopNode(WorkflowNode):
     __identifier__ = 'workflow'
     NODE_NAME = '循环'
+    NODE_CATEGORY = '循环'
+    NODE_ICON = 'fa5s.sync-alt'
 
     def __init__(self):
         super().__init__()

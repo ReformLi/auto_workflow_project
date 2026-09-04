@@ -16,6 +16,7 @@ class DelayNode(WorkflowNode):
     """延时节点"""
     __identifier__ = 'workflow'
     NODE_NAME = '等待'
+    NODE_CATEGORY = '等待'
 
     def __init__(self):
         super(DelayNode, self).__init__()

@@ -1,27 +1,26 @@
 # -*- coding: utf-8 -*-
 """
 node_graph_panel.py
-作者: reformLi
-创建日期: 2026/4/25
-最后修改: 2026/4/25
-版本: 1.0.0
-
 功能描述: 节点图画布面板——集成 NodeGraphQt 的 widget，放置到主窗口中央
+         负责画布层视觉：深色底 + 点阵网格 + 连线按来源节点分类色着色 + 两级右键菜单
+         （见 UI_DESIGN.md §5.4）
 """
-# ui/node_graph_panel.py
 import logging
 
+from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QMenu
-from PyQt5 import QtGui
 
+from NodeGraphQt.constants import PipeLayoutEnum, ViewerEnum
 from core.events import event_bus
-from ui.styles import ThemeManager
-from NodeGraphQt.constants import ViewerEnum
+from ui import icons, tokens
+from ui.theme import ThemeState
 
 
 class NodeGraphPanel(QWidget):
-    def __init__(self, core_manager=None,theme_manager=None):
+    """节点图画布面板（画布配色、网格、连线着色、右键建节点）"""
+
+    def __init__(self, core_manager=None, theme_state=None):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.core_manager = core_manager
@@ -29,76 +28,154 @@ class NodeGraphPanel(QWidget):
 
         self.view = self.core_manager.get_view()
 
-        self.theme_manager = theme_manager or ThemeManager()  # 使用主题管理器
-        self.update_theme(self.theme_manager)
-        # 鼠标右键
+        self.theme_state = theme_state or ThemeState()
+
+        # 画布视觉（背景 / 网格 / 连线走向）
+        self.apply_canvas_theme()
+
+        # 右键菜单
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self.on_view_context_menu)
+
         # 拖拽创建节点
-        self.view.dragEnterEvent = self.view_dragEnterEvent  # 动态绑定方法
+        self.view.dragEnterEvent = self.view_dragEnterEvent
         self.view.dropEvent = self.view_dropEvent
-        # 获取图形视图并设置拖拽
-        self.view.setAcceptDrops(True)  # 允许 view 接收拖拽
+        self.view.setAcceptDrops(True)
+
+        # 连线着色：图结构变化后去抖重刷
+        self._pipe_timer = QtCore.QTimer(self)
+        self._pipe_timer.setSingleShot(True)
+        self._pipe_timer.setInterval(60)
+        self._pipe_timer.timeout.connect(self.refresh_pipe_colors)
+        event_bus.graph_changed.connect(self._pipe_timer.start)
 
     def get_widget(self):
         return self.core_manager.get_widget()
 
-    def update_theme(self, theme_manager):
-        """更新节点图主题"""
+    # ── 画布主题 ────────────────────────────────────────
+    def apply_canvas_theme(self):
+        """应用画布配色与连线走向（NodeGraphQt 画布不吃 QSS，必须走这套 API）"""
         try:
-            # NodeGraphQt 的主题设置
-            scene = self.view.scene()
-            if theme_manager.current_theme == 'dark':
-                # 深色主题
-                scene.setBackgroundBrush(QtGui.QColor('#1e1e1e'))
-            else:
-                # 浅色主题
-                scene.setBackgroundBrush(QtGui.QColor('#f5f5f5'))
-            self.logger.info(f'节点图主题已更新为: {theme_manager.current_theme}')
+            graph = self.graph_manager.node_graph
+            graph.set_background_color(*tokens.rgb(tokens.DARK['bg_canvas']))
+            graph.set_grid_color(*tokens.rgb(tokens.DARK['grid_dot']))
+            graph.set_pipe_style(PipeLayoutEnum.CURVED.value)
+            self.update_grid(self.theme_state.grid_display)
         except Exception as e:
-            self.logger.error(f'更新节点图主题失败: {str(e)}')
+            self.logger.error(f'应用画布主题失败: {str(e)}')
+
+    def update_theme(self, theme_state):
+        """更新主题（主窗口 apply_theme 调用）"""
+        self.theme_state = theme_state
+        self.apply_canvas_theme()
+        self.refresh_pipe_colors()
 
     def update_grid(self, grid_display):
-        """更新节点图网格线"""
-        try:
-            # 显示网格线
-            if grid_display:
-                # # GRID_DISPLAY_LINES (2)：线状网格（最明显）
-                self.graph_manager.node_graph.set_grid_mode(ViewerEnum.GRID_DISPLAY_LINES.value)
-            else:
-                # GRID_DISPLAY_NONE (0)：无网格
-                self.graph_manager.node_graph.set_grid_mode(ViewerEnum.GRID_DISPLAY_NONE.value)
-            self.logger.info(f'节点图网格线已更新: {grid_display}')
-        except Exception as e:
-            self.logger.error(f'更新节点图主题失败: {str(e)}')
+        """
+        更新节点图网格线。
 
+        注意：不使用 ViewerEnum.GRID_DISPLAY_DOTS —— NodeGraphQt 0.6.44 的
+        NodeScene._draw_dots() 里 `pen.setWidth(grid_size / 10)` 把 float 传给 int 参数，
+        在绘制虚函数中会让进程直接 abort（无 Python 异常、无 stderr）。
+        这里改用线状网格，配合低对比网格色 tokens.grid_dot 达到同样克制的观感。
+        """
+        try:
+            mode = (ViewerEnum.GRID_DISPLAY_LINES.value if grid_display
+                    else ViewerEnum.GRID_DISPLAY_NONE.value)
+            self.graph_manager.node_graph.set_grid_mode(mode)
+            self.logger.debug(f'节点图网格线已更新: {grid_display}')
+        except Exception as e:
+            self.logger.error(f'更新节点图网格失败: {str(e)}')
+
+    # ── 连线着色 ────────────────────────────────────────
+    def refresh_pipe_colors(self):
+        """
+        按「输出端所属节点」的分类色给连线着色。
+        NodeGraphQt 未提供 NodeGraph 级连线配色 API，这里遍历场景中的 PipeItem，
+        使用其公开的 output_port / color / style 属性完成着色；
+        任何异常都只记调试日志，绝不影响连线功能。
+        """
+        try:
+            scene = self.view.scene()
+            if scene is None:
+                return
+            for item in scene.items():
+                if type(item).__name__ != 'PipeItem':
+                    continue
+                color = self._pipe_color_for(item)
+                item.color = color
+                item.set_pipe_styling(color=color, width=2, style=item.style)
+        except Exception as e:
+            self.logger.debug(f'连线着色跳过: {e}')
+
+    def _pipe_color_for(self, pipe_item):
+        """取连线颜色 = 输出节点的分类色（NodeItem.color 为 (r,g,b,a) 元组属性）"""
+        try:
+            node_item = pipe_item.output_port.node if pipe_item.output_port else None
+            color = getattr(node_item, 'color', None) if node_item else None
+            if color and len(color) >= 3:
+                alpha = int(round((color[3] if len(color) > 3 else 255) * 0.85))
+                return int(color[0]), int(color[1]), int(color[2]), alpha
+        except Exception:
+            pass
+        fallback = QtGui.QColor(tokens.DARK['text_2nd'])
+        return fallback.red(), fallback.green(), fallback.blue(), 200
+
+    # ── 右键菜单（两级：分类 → 节点） ───────────────────
     def on_view_context_menu(self, pos):
-        """处理视图右键菜单"""
-        # pos 是视图坐标（相对于视图）
+        """处理视图右键菜单：按分类分组的二级菜单"""
         scene_pos = self.view.mapToScene(pos)
         menu = QMenu(self.view)
-        nodes_info = self.core_manager.get_available_nodes()
-        node_id = None
-        for node in nodes_info:
-            node_id = node.get("node_type")
-            action = menu.addAction(node.get("name"))
-            action.setData(node_id)
-        action = menu.exec_(self.view.mapToGlobal(pos))
-        if action:
-            node_id = action.data()
-            if node_id:
-                try:
-                    pos_tuple = (scene_pos.x(), scene_pos.y())  # 转换成元组，得到 (x, y)
-                    node = self.graph_manager.node_graph.create_node(node_id,pos=pos_tuple)
-                    if node:
-                        self.logger.info(f"右键创建节点: {node_id} 位置 {scene_pos}")
-                        event_bus.node_dropped.emit(node_id, scene_pos)
-                except Exception as e:
-                    self.logger.error(f"右键创建节点失败: {str(e)}")
 
+        for label, entry in self._group_by_category(self.core_manager.get_available_nodes()):
+            submenu = menu.addMenu(icons.icon(entry['icon'], color=entry['color']), label)
+            for node in entry['nodes']:
+                action = submenu.addAction(icons.icon(node['icon'], color=node['color']), node['name'])
+                action.setData(node['node_type'])
+
+        action = menu.exec_(self.view.mapToGlobal(pos))
+        if not action:
+            return
+        node_type = action.data()
+        if not node_type:
+            return
+        try:
+            pos_tuple = (scene_pos.x(), scene_pos.y())
+            node = self.graph_manager.node_graph.create_node(node_type, pos=pos_tuple)
+            if node:
+                self.logger.info(f"右键创建节点: {node_type} 位置 {scene_pos}")
+                event_bus.node_dropped.emit(node_type, scene_pos)
+        except Exception as e:
+            self.logger.error(f"右键创建节点失败: {str(e)}")
+
+    @staticmethod
+    def _group_by_category(nodes_info):
+        """把可用节点按分组聚合为 [(分组名, {'icon','color','nodes'})]，顺序跟随 tokens.GROUP_ORDER"""
+        buckets = {}
+        for node in nodes_info:
+            style = tokens.category_style(node.get('category') or '')
+            group = style['group']
+            entry = buckets.setdefault(group, {
+                'icon': tokens.GROUP_ICONS.get(group, 'fa5s.layer-group'),
+                'color': tokens.DARK['text_2nd'],
+                'nodes': [],
+            })
+            entry['nodes'].append({
+                'node_type': node['node_type'],
+                'name': node['name'],
+                'icon': node.get('icon') or style['icon'],
+                'color': style['color'],
+            })
+
+        ordered = [(group, buckets[group]) for group in tokens.GROUP_ORDER if group in buckets]
+        for group, entry in buckets.items():          # 未登记分组兜底追加
+            if group not in [name for name, _ in ordered]:
+                ordered.append((group, entry))
+        return ordered
+
+    # ── 拖拽创建 ────────────────────────────────────────
     def view_dragEnterEvent(self, event):
         """检查拖拽数据是否包含文本，接受拖拽"""
-        self.logger.error(event.mimeData().hasText())
         if event.mimeData().hasText():
             event.acceptProposedAction()
         else:
@@ -111,22 +188,14 @@ class NodeGraphPanel(QWidget):
             event.ignore()
             return
 
-        # 将视图坐标转换为场景坐标
-        view_pos = event.pos()
-        # scene_pos = self.mapToScene(view_pos)
-
-        # 创建节点并添加到场景
         node_type = text
-        scene_pos = self.view.mapToScene(view_pos)
-        pos_tuple = (scene_pos.x(), scene_pos.y())    # 转换成元组，得到 (x, y)
+        scene_pos = self.view.mapToScene(event.pos())
+        pos_tuple = (scene_pos.x(), scene_pos.y())
         try:
-            self.graph_manager.node_graph.create_node(node_type,pos=pos_tuple)
+            self.graph_manager.node_graph.create_node(node_type, pos=pos_tuple)
             self.logger.info(f"从拖拽创建节点: {node_type} 位置 {scene_pos}")
-            # 将节点拖拽到该位置
-            # node.set_pos(scene_pos.x(), scene_pos.y())
             event_bus.node_dropped.emit(node_type, scene_pos)
             event.setDropAction(Qt.CopyAction)
-            event.acceptProposedAction()
         except Exception as e:
             self.logger.error(f"创建节点失败: {str(e)}")
         event.acceptProposedAction()

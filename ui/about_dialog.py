@@ -1,144 +1,171 @@
 # -*- coding: utf-8 -*-
 """
 about_dialog.py
-关于对话框
-显示应用程序信息、版本和版权信息
+功能描述: 关于对话框（应用信息 / 技术栈 / 许可证）
+         图标改用 qtawesome 矢量图标，技术信息与实际依赖版本对齐。
+         见 UI_DESIGN.md §5.7
 """
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextBrowser, QTabWidget, QWidget
+    QDialog, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QTabWidget, QTextBrowser, QVBoxLayout, QWidget
 )
 
 from app.config import APP_NAME, APP_VERSION
-from ui.styles import ThemeManager
+from ui import icons, qss, tokens
+
+# 技术栈（与 requirements.txt 保持一致）
+_STACK_ROWS = [
+    ('GUI 框架', 'PyQt5 5.15.11'),
+    ('矢量图标', 'QtAwesome 1.4.2'),
+    ('节点图引擎', 'NodeGraphQt 0.6.44'),
+    ('Windows 自动化', 'uiautomation 2.0.29 / pywin32 311'),
+    ('图像识别', 'opencv-python 4.13 / numpy 2.4'),
+    ('剪贴板', 'pyperclip 1.11.0'),
+    ('Python', '3.11+（Windows）'),
+]
+
+_FEATURES = [
+    '可视化节点编排（拖拽创建、连线、框选）',
+    '流程控制：条件分支 / 循环 / 等待',
+    '窗口自动化：查找 / 激活 / 鼠标 / 键盘 / 图像定位',
+    '子线程执行引擎：支持暂停 / 恢复 / 终止',
+    '节点级实时状态与耗时反馈',
+    '工作流校验与 JSON 持久化',
+]
 
 
 class AboutDialog(QDialog):
     """关于对话框"""
 
-    def __init__(self, theme_manager, parent=None):
+    def __init__(self, theme_state=None, parent=None):
         super().__init__(parent)
-        self.theme_manager = theme_manager
+        self.theme_state = theme_state
         self.setWindowTitle('关于')
-        self.setMinimumWidth(500)
-        self.setMinimumHeight(400)
+        self.setMinimumSize(520, 420)
 
-        self.setup_ui()
+        self._build()
 
-    def setup_ui(self):
-        """设置用户界面"""
-        main_layout = QVBoxLayout(self)
+    # ── 构建 ────────────────────────────────────────────
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
-        # 创建选项卡
-        tab_widget = QTabWidget()
+        tabs = QTabWidget()
+        tabs.addTab(self._about_tab(), '关于')
+        tabs.addTab(self._tech_tab(), '技术信息')
+        tabs.addTab(self._license_tab(), '许可证')
+        layout.addWidget(tabs, 1)
 
-        # 关于选项卡
-        about_tab = QWidget()
-        about_layout = QVBoxLayout(about_tab)
+        close_button = QPushButton('关闭')
+        qss.set_kind(close_button, 'primary')
+        close_button.clicked.connect(self.close)
 
-        # 应用程序信息
-        app_info_layout = QHBoxLayout()
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        button_row.addWidget(close_button)
+        layout.addLayout(button_row)
 
-        # 应用程序图标（使用文本代替）
-        icon_label = QLabel('🚀')
-        icon_label.setStyleSheet("font-size: 64px;")
-        icon_label.setAlignment(Qt.AlignCenter)
-        app_info_layout.addWidget(icon_label)
+    def _about_tab(self):
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(20, 24, 20, 12)
+        outer.setSpacing(10)
 
-        # 应用程序详细信息
-        app_details_layout = QVBoxLayout()
+        # 头部：矢量图标 + 名称/版本/简介
+        header = QHBoxLayout()
+        header.setSpacing(16)
 
-        app_name_label = QLabel(APP_NAME)
-        app_name_label.setStyleSheet("font-size: 24px; font-weight: bold;")
-        app_name_label.setAlignment(Qt.AlignCenter)
+        logo = QLabel()
+        logo.setPixmap(self._logo_pixmap(64))
+        logo.setFixedSize(64, 64)
+        logo.setAlignment(Qt.AlignCenter)
+        header.addWidget(logo)
 
-        version_label = QLabel(f'版本 {APP_VERSION}')
-        version_label.setStyleSheet("font-size: 16px;")
-        version_label.setAlignment(Qt.AlignCenter)
+        info = QVBoxLayout()
+        info.setSpacing(2)
 
-        description_label = QLabel('基于PyQt5和NodeGraphQt的\n可视化脚本工作流编辑器')
-        description_label.setStyleSheet("font-size: 14px;")
-        description_label.setAlignment(Qt.AlignCenter)
+        name = QLabel(APP_NAME)
+        name.setStyleSheet(f"font-size: 20pt; font-weight: bold; color: {tokens.DARK['text']};")
+        version = QLabel(f'版本 {APP_VERSION}')
+        version.setStyleSheet(f"font-size: 10pt; color: {tokens.DARK['text_2nd']};")
+        subtitle = QLabel('基于 PyQt5 与 NodeGraphQt 的可视化自动化工作流编辑器')
+        subtitle.setStyleSheet(f"font-size: 10pt; color: {tokens.DARK['text_dim']};")
 
-        app_details_layout.addWidget(app_name_label)
-        app_details_layout.addWidget(version_label)
-        app_details_layout.addWidget(description_label)
+        info.addWidget(name)
+        info.addWidget(version)
+        info.addWidget(subtitle)
+        header.addLayout(info, 1)
+        outer.addLayout(header)
 
-        app_info_layout.addLayout(app_details_layout)
-        about_layout.addLayout(app_info_layout)
+        # 主要功能
+        features_title = QLabel('主要功能')
+        features_title.setStyleSheet(f"font-weight: bold; color: {tokens.DARK['text']};")
+        outer.addWidget(features_title)
 
-        # 功能特性
-        features_label = QLabel('主要功能:')
-        features_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        about_layout.addWidget(features_label)
+        features = QLabel('\n'.join(f'• {text}' for text in _FEATURES))
+        features.setStyleSheet(f"color: {tokens.DARK['text_2nd']};")
+        outer.addWidget(features)
 
-        features_text = QLabel(
-            '• 可视化节点编辑器\n'
-            '• 丰富的节点类型\n'
-            '• 完整的用户界面\n'
-            '• 工作流管理\n'
-            '• 实时日志\n'
-            '• 工作流验证'
-        )
-        features_text.setStyleSheet("font-size: 14px;")
-        about_layout.addWidget(features_text)
+        outer.addStretch(1)
 
-        about_layout.addStretch()
-
-        # 版权信息
-        copyright_label = QLabel('© 2026 reformLi. MIT License')
-        copyright_label.setStyleSheet("font-size: 12px; color: #888888;")
+        copyright_label = QLabel('© 2026 reformLi · MIT License')
         copyright_label.setAlignment(Qt.AlignCenter)
-        about_layout.addWidget(copyright_label)
+        copyright_label.setStyleSheet(f"color: {tokens.DARK['text_dim']};")
+        outer.addWidget(copyright_label)
+        return tab
 
-        tab_widget.addTab(about_tab, '关于')
+    def _tech_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # 技术信息选项卡
-        tech_tab = QWidget()
-        tech_layout = QVBoxLayout(tech_tab)
+        browser = QTextBrowser()
+        browser.setReadOnly(True)
+        rows = ''.join(
+            f'<tr><td style="padding:4px 16px 4px 0;color:{tokens.DARK["text_2nd"]}">{k}</td>'
+            f'<td style="color:{tokens.DARK["text"]}">{v}</td></tr>'
+            for k, v in _STACK_ROWS
+        )
+        browser.setHtml(
+            f'<div style="font-family:"Microsoft YaHei UI";font-size:10pt">'
+            f'<h4 style="color:{tokens.DARK["text"]}">技术栈</h4>'
+            f'<table>{rows}</table>'
+            f'<h4 style="color:{tokens.DARK["text"]}">运行环境</h4>'
+            f'<ul style="color:{tokens.DARK["text_2nd"]}">'
+            f'<li>Windows 10 / 11（依赖 pywin32、uiautomation）</li>'
+            f'<li>Python 3.11 及以上</li>'
+            f'<li>建议使用项目内 venv 解释器运行</li>'
+            f'</ul></div>'
+        )
+        layout.addWidget(browser)
+        return tab
 
-        tech_info = QTextBrowser()
-        tech_info.setReadOnly(True)
-        tech_info.setHtml("""
-        <h3>技术栈</h3>
-        <ul>
-            <li><b>GUI框架:</b> PyQt5 5.15.10</li>
-            <li><b>节点图库:</b> NodeGraphQt 0.6.44</li>
-            <li><b>Python版本:</b> 3.7+</li>
-            <li><b>开发环境:</b> Windows 11</li>
-        </ul>
+    def _license_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        <h3>系统要求</h3>
-        <ul>
-            <li>Python 3.7或更高版本</li>
-            <li>PyQt5 5.15.10</li>
-            <li>NodeGraphQt 0.6.44</li>
-            <li>Windows 7或更高版本</li>
-        </ul>
-
-        <h3>依赖包</h3>
-        <ul>
-            <li>PyQt5 - GUI框架</li>
-            <li>NodeGraphQt - 节点图编辑器</li>
-            <li>pywinauto - Windows自动化</li>
-            <li>uiautomation - UI自动化</li>
-        </ul>
-        """)
-
-        tech_layout.addWidget(tech_info)
-        tab_widget.addTab(tech_tab, '技术信息')
-
-        # 许可证选项卡
-        license_tab = QWidget()
-        license_layout = QVBoxLayout(license_tab)
-
+        area = QScrollArea()
+        area.setWidgetResizable(True)
         license_text = QTextBrowser()
-        license_text.setReadOnly(True)
-        license_text.setPlainText("""
-MIT License
+        license_text.setPlainText(_MIT_LICENSE)
+        area.setWidget(license_text)
+        layout.addWidget(area)
+        return tab
+
+    @staticmethod
+    def _logo_pixmap(size):
+        """用矢量图标生成关于框 logo（分类色底 + 深色字形）"""
+        pixmap = icons.tile_pixmap('fa5s.project-diagram', tokens.DARK['accent'],
+                                   size=size, radius=size // 6)
+        return pixmap
+
+
+_MIT_LICENSE = """MIT License
 
 Copyright (c) 2026 reformLi
 
@@ -158,54 +185,4 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-        """)
-
-        license_layout.addWidget(license_text)
-        tab_widget.addTab(license_tab, '许可证')
-
-        main_layout.addWidget(tab_widget)
-
-        # 关闭按钮
-        close_button = QPushButton('关闭')
-        close_button.clicked.connect(self.close)
-        close_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007acc;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #005a9e;
-            }
-        """)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(close_button)
-        main_layout.addLayout(button_layout)
-
-        # 应用主题样式
-        self.apply_theme_styling()
-
-    def apply_theme_styling(self):
-        """应用主题样式"""
-        stylesheet = self.theme_manager.get_stylesheet('about_dialog')
-        self.setStyleSheet(stylesheet)
-
-        # 特殊样式保持独立（这些是动态内容，不适合放在通用样式表中）
-        icon_color = self.theme_manager.colors['accent']
-        copyright_color = self.theme_manager.colors['text_tertiary']
-
-        # 应用特殊样式
-        self.setStyleSheet(self.styleSheet() + f"""
-            QLabel[style*="font-size: 64px;"] {{
-                color: {icon_color};
-            }}
-            QLabel[style*="color: #888888;"] {{
-                color: {copyright_color};
-            }}
-        """)
+SOFTWARE."""

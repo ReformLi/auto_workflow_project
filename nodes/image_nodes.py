@@ -17,7 +17,8 @@ finder = ImageFinder(confidence=0.9)
 class FindImageNode(WorkflowNode):
     __identifier__ = 'workflow'
     NODE_NAME = "查找图片"
-    NODE_CATEGORY = "图像操作"
+    NODE_ICON = 'fa5s.search-plus'
+    NODE_CATEGORY = "图像识别"
 
     def __init__(self):
         super().__init__()

@@ -14,6 +14,7 @@ class StartNode(WorkflowNode):
     """开始节点"""
     __identifier__ = 'workflow'
     NODE_NAME = '开始'
+    NODE_CATEGORY = '开始'
 
     def __init__(self):
         super().__init__()

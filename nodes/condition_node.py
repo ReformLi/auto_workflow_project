@@ -14,6 +14,7 @@ from utils.safe_eval import safe_eval, SafeEvalError
 class IfElseNode(WorkflowNode):
     __identifier__ = 'workflow'
     NODE_NAME = '条件判断'
+    NODE_CATEGORY = '条件判断'
 
     def __init__(self):
         super().__init__()

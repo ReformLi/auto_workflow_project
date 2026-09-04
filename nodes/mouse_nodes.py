@@ -18,6 +18,7 @@ class ClickNode(WorkflowNode):
     """开始节点"""
     __identifier__ = 'workflow'
     NODE_NAME = '点击'
+    NODE_CATEGORY = '输入操作'
 
     # PROPERTY_DEFS = [
     #     {

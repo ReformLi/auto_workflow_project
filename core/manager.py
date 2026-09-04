@@ -107,7 +107,9 @@ class CoreManager:
                 'node_type': cls.type_,                  # node_type  格式为："workflow.StartNode"
                 'type': cls.__name__,                    # 类名
                 'name': cls.NODE_NAME,                   # 显示名称
-                # 'category': cls.NODE_CATEGORY,           # 分类
+                'category': getattr(cls, 'NODE_CATEGORY', None),  # 分类键（None → UI 回落默认）
+                'icon': getattr(cls, 'NODE_ICON', None),           # 图标名（None → 分类默认图标）
+                'description': getattr(cls, 'NODE_DESCRIPTION', None),
             })
         return nodes_info
 
@@ -140,4 +142,22 @@ class CoreManager:
             return len(self.graph_manager.node_graph.all_nodes())
         except Exception:
             return 0
+
+    def get_connection_count(self):
+        """获取当前工作流中的连线数量（按输入端口侧统计，一条连线只计一次）"""
+        try:
+            total = 0
+            for node in self.graph_manager.node_graph.all_nodes():
+                for port in node.inputs().values():     # inputs() 是 {端口名: Port} 字典
+                    total += len(port.connected_ports())
+            return total
+        except Exception:
+            return 0
+
+    def get_graph_stats(self):
+        """返回图结构统计（供状态栏展示）"""
+        return {
+            'nodes': self.get_node_count(),
+            'connections': self.get_connection_count(),
+        }
 

@@ -14,6 +14,8 @@ from abc import ABC, abstractmethod
 from NodeGraphQt import BaseNode
 from PyQt5 import QtWidgets, QtGui
 
+from ui import icons, tokens
+
 
 class WorkflowNode(BaseNode, ABC):
     """
@@ -21,6 +23,10 @@ class WorkflowNode(BaseNode, ABC):
     """
     __identifier__ = 'workflow'  # 默认标识，子类可覆盖
     NODE_NAME = 'WorkflowNode'
+
+    # 视觉语义（子类声明）：分类键为中文，取值见 ui/tokens.NODE_CATEGORIES
+    NODE_CATEGORY = None      # None → 回落 tokens 兜底样式
+    NODE_ICON = None          # None 时使用分类默认图标
 
     # 全局弱引用字典：{node_id: node_instance}
     _instances = weakref.WeakValueDictionary()
@@ -31,6 +37,9 @@ class WorkflowNode(BaseNode, ABC):
         self._executed = False
         self._output_data = None
         self.set_disabled(False)
+
+        # 分类色 + 分类图标（放在 __init__ 中，反序列化加载旧工作流同样生效）
+        self._apply_visual_style()
 
         # ========== 新增：状态显示相关 ==========
         # 生成唯一标识（使用Python对象id，也可用uuid）
@@ -45,8 +54,22 @@ class WorkflowNode(BaseNode, ABC):
         self.status_text.document().setDefaultStyleSheet(
             "div { margin:0; padding:0; } br { line-height: 0.6; }"
         )
-        self.status_text.setDefaultTextColor(QtGui.QColor(255, 255, 255))
+        self.status_text.setDefaultTextColor(QtGui.QColor(tokens.DARK['text']))
         self.status_text.setVisible(False)
+
+    def _apply_visual_style(self):
+        """按 NODE_CATEGORY / NODE_ICON 应用节点头部色与图标"""
+        try:
+            color = tokens.category_color(self.NODE_CATEGORY)
+            self.set_color(*tokens.rgb(color))
+
+            icon_name = self.NODE_ICON or tokens.category_icon(self.NODE_CATEGORY)
+            icon_path = icons.node_icon_path(icon_name, tokens.DARK['bg_canvas'])
+            if icon_path:
+                self.set_icon(icon_path)
+        except Exception:
+            # 视觉样式失败不能影响节点可用性
+            pass
 
     def get_node_id(self) -> str:
         """返回节点的唯一标识（供工作流线程使用）"""
@@ -61,7 +84,7 @@ class WorkflowNode(BaseNode, ABC):
             return
         self.status_text.setHtml(html)
         self.status_text.setVisible(bool(html))
-        color = QtGui.QColor(255, 80, 80) if is_error else QtGui.QColor(80, 200, 80)
+        color = QtGui.QColor(tokens.DARK['error'] if is_error else tokens.DARK['success'])
         self.status_text.setDefaultTextColor(color)
 
         # 重新计算位置（节点内部右上角，留4像素边距）

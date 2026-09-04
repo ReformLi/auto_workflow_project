@@ -16,6 +16,8 @@ class HotkeyNode(WorkflowNode):
     """开始节点"""
     __identifier__ = 'workflow'
     NODE_NAME = '键盘输入'
+    NODE_CATEGORY = '输入操作'
+    NODE_ICON = 'fa5s.keyboard'
 
     def __init__(self):
         super().__init__()

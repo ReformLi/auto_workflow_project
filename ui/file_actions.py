@@ -15,6 +15,15 @@ class FileActions:
         self.core_manager = window.core_manager
         self.current_file = None
 
+    def _notify_status(self, dirty=False):
+        """通知主窗口同步状态栏文件指示（主窗口未就绪时静默忽略）"""
+        notify = getattr(self.window, 'notify_file_change', None)
+        if callable(notify):
+            try:
+                notify(dirty=dirty)
+            except Exception:
+                pass
+
     def new_workflow(self):
         """新建工作流"""
         self.logger.info('开始新建工作流...')
@@ -33,6 +42,11 @@ class FileActions:
         self.core_manager.new_workflow()
         # 清除当前文件记录
         self.current_file = None
+        status_view = getattr(self.window, 'status_view', None)
+        reset_elapsed = getattr(status_view, 'reset_elapsed', None)
+        if callable(reset_elapsed):
+            reset_elapsed()
+        self._notify_status()
         self.logger.info('新建工作流')
 
     def open_workflow(self):
@@ -44,6 +58,7 @@ class FileActions:
             try:
                 if self.core_manager.load_workflow(file_path):
                     self.current_file = file_path
+                    self._notify_status()
                     self.logger.info(f'打开工作流文件: {file_path}')
                 else:
                     self.logger.error(f'打开文件失败:无法加载')
@@ -57,6 +72,7 @@ class FileActions:
         try:
             if self.core_manager.save_workflow(self.current_file):
                 self.logger.info(f'保存工作流到: {self.current_file}')
+                self._notify_status()
                 return True
         except Exception as e:
             self.logger.error(f'保存文件失败: {str(e)}')

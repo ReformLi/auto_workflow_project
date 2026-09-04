@@ -2,107 +2,70 @@
 """
 log_search_bar.py
 功能描述: 日志搜索工具栏——搜索框/高亮/计数/前后导航，操作目标为注入的 QTextEdit
+         高亮使用 QTextEdit.setExtraSelections（非破坏性叠加层），不改动只读文档；
+         旧实现用 mergeCharFormat 直接改文档，在只读控件上会导致进程 abort。
+         样式统一由全局 QSS 提供（objectName 选择器），本文件不再内联样式表
 """
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtGui import QColor, QTextCharFormat
-from PyQt5.QtWidgets import QToolBar, QLineEdit, QLabel, QToolButton
+from PyQt5.QtGui import QColor, QTextCharFormat, QTextCursor
+from PyQt5.QtWidgets import QLineEdit, QLabel, QTextEdit, QToolBar, QToolButton
+
+from ui import icons, tokens
+
+MAX_MATCHES = 5000    # 防御：极端搜索词不做无界遍历
 
 
 class LogSearchBar(QToolBar):
     """日志搜索工具栏：搜索/高亮/计数/导航，操作目标为注入的 QTextEdit"""
 
-    closed = pyqtSignal()  # 点击 ✕ 或 close_search() 时发出
+    closed = pyqtSignal()  # 关闭搜索时发出
 
-    def __init__(self, log_text, theme_manager, parent=None):
+    def __init__(self, log_text, parent=None):
         super().__init__(parent)
         self._log_text = log_text
-        self.theme_manager = theme_manager
-        self.search_matches = []
+        self.search_matches = []          # [(起始位置, 长度), ...]
         self.current_match_index = -1
         self._build_ui()
 
     def _build_ui(self):
         """构建搜索框/计数/导航/关闭按钮"""
-        self.setStyleSheet(self.theme_manager.get_stylesheet('search_toolbar'))
+        self.setObjectName('logSearchBar')
         self.setMovable(False)
+        self.setFloatable(False)
         self.setVisible(False)  # 默认隐藏
 
-        # 搜索框
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("搜索日志...")
-        self.search_box.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {self.theme_manager.colors['primary_bg']};
-                color: {self.theme_manager.colors['text_primary']};
-                border: 1px solid {self.theme_manager.colors['border']};
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 200px;
-            }}
-        """)
+        self.search_box.setObjectName('logSearchInput')
+        self.search_box.setPlaceholderText("搜索日志…")
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.addAction(
+            icons.icon('fa5s.search', color=tokens.DARK['text_dim']),
+            QLineEdit.LeadingPosition)
         self.search_box.textChanged.connect(self.search_logs)
 
-        # 搜索结果计数标签
         self.count_label = QLabel("0/0")
-        self.count_label.setStyleSheet(f"color: {self.theme_manager.colors['text_secondary']}; font-size: 11px;")
-        self.count_label.setMinimumWidth(40)
+        self.count_label.setObjectName('logSearchCount')
+        self.count_label.setMinimumWidth(46)
 
-        # 上一个按钮
-        btn_style = f"""
-            QToolButton {{
-                background-color: {self.theme_manager.colors['button_bg']};
-                color: {self.theme_manager.colors['text_primary']};
-                border: 1px solid {self.theme_manager.colors['border_light']};
-                border-radius: 4px;
-                padding: 4px;
-                min-width: 30px;
-            }}
-            QToolButton:hover {{
-                background-color: {self.theme_manager.colors['button_hover']};
-            }}
-        """
-        close_btn_style = f"""
-            QToolButton {{
-                background-color: {self.theme_manager.colors['button_bg']};
-                color: {self.theme_manager.colors['text_primary']};
-                border: 1px solid {self.theme_manager.colors['border_light']};
-                border-radius: 4px;
-                padding: 4px;
-                min-width: 30px;
-            }}
-            QToolButton:hover {{
-                background-color: {self.theme_manager.colors['error']};
-                border-color: {self.theme_manager.colors['critical']};
-            }}
-        """
+        self.prev_btn = self._make_button('fa5s.angle-up', '上一个匹配项', self.search_previous)
+        self.next_btn = self._make_button('fa5s.angle-down', '下一个匹配项', self.search_next)
+        self.close_btn = self._make_button('fa5s.times', '关闭搜索', self.close_search,
+                                           object_name='logSearchClose')
 
-        self.prev_btn = QToolButton()
-        self.prev_btn.setText("↑")
-        self.prev_btn.setToolTip("上一个匹配项")
-        self.prev_btn.setStyleSheet(btn_style)
-        self.prev_btn.clicked.connect(self.search_previous)
+        for widget in (self.search_box, self.count_label,
+                       self.prev_btn, self.next_btn, self.close_btn):
+            self.addWidget(widget)
 
-        # 下一个按钮
-        self.next_btn = QToolButton()
-        self.next_btn.setText("↓")
-        self.next_btn.setToolTip("下一个匹配项")
-        self.next_btn.setStyleSheet(btn_style)
-        self.next_btn.clicked.connect(self.search_next)
+    @staticmethod
+    def _make_button(icon_name, tooltip, slot, object_name='logSearchButton'):
+        button = QToolButton()
+        button.setObjectName(object_name)
+        button.setIcon(icons.toolbar_icon(icon_name))
+        button.setToolTip(tooltip)
+        button.clicked.connect(slot)
+        return button
 
-        # 关闭搜索按钮
-        self.close_btn = QToolButton()
-        self.close_btn.setText("✕")
-        self.close_btn.setToolTip("关闭搜索")
-        self.close_btn.setStyleSheet(close_btn_style)
-        self.close_btn.clicked.connect(self.close_search)
-
-        # 添加到工具栏
-        self.addWidget(self.search_box)
-        self.addWidget(self.count_label)
-        self.addWidget(self.prev_btn)
-        self.addWidget(self.next_btn)
-        self.addWidget(self.close_btn)
-
+    # ── 显隐 ────────────────────────────────────────────
     def open_search(self):
         """打开搜索栏并聚焦"""
         self.setVisible(True)
@@ -115,103 +78,99 @@ class LogSearchBar(QToolBar):
         self.clear_search_highlights()
         self.closed.emit()
 
-    def apply_theme(self, theme_manager):
-        """更新搜索工具栏样式"""
-        self.theme_manager = theme_manager
-        self.setStyleSheet(theme_manager.get_stylesheet('search_toolbar'))
-
+    # ── 搜索与高亮 ──────────────────────────────────────
     def search_logs(self, search_text):
-        """搜索日志内容"""
+        """搜索日志内容并高亮全部匹配项"""
         if not search_text:
             self.clear_search_highlights()
             self.count_label.setText("0/0")
             return
 
-        # 清除之前的高亮
-        self.clear_search_highlights()
-
-        # 搜索匹配项
-        cursor = self._log_text.textCursor()
-        cursor.movePosition(cursor.Start)
-
-        self.search_matches = []
-        fmt = QTextCharFormat()
-        fmt.setBackground(QColor('#ffa502'))  # 橙色高亮
-        fmt.setForeground(QColor('#000000'))  # 黑色文本
-
-        while True:
-            cursor = self._log_text.document().find(search_text, cursor)
-            if cursor.isNull():
-                break
-            # 保存匹配位置
-            self.search_matches.append(cursor.position())
-            # 高亮匹配项
-            cursor.movePosition(cursor.NoMove, cursor.KeepAnchor, len(search_text))
-            self._log_text.setTextCursor(cursor)
-            cursor.mergeCharFormat(fmt)
-            cursor.clearSelection()
-
-        # 更新计数显示
-        total_matches = len(self.search_matches)
-        if total_matches > 0:
+        self.search_matches = self._find_all(search_text)
+        total = len(self.search_matches)
+        if total:
             self.current_match_index = 0
-            self.highlight_current_match()
-            self.count_label.setText(f"{self.current_match_index + 1}/{total_matches}")
+            self._apply_extra_selections()
+            self._scroll_to_current()
+            self.count_label.setText(f"1/{total}")
         else:
             self.current_match_index = -1
+            self._apply_extra_selections()
             self.count_label.setText("0/0")
 
+    def _find_all(self, text):
+        """在文档中查找全部非重叠匹配，返回 [(位置, 长度)]"""
+        document = self._log_text.document()
+        matches = []
+        cursor = QTextCursor(document)
+        while len(matches) < MAX_MATCHES:
+            cursor = document.find(text, cursor)
+            if cursor.isNull():
+                break
+            matches.append((cursor.selectionStart(), len(text)))
+            cursor.setPosition(cursor.selectionEnd())
+        return matches
+
     def clear_search_highlights(self):
-        """清除搜索高亮"""
-        cursor = self._log_text.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.End, cursor.KeepAnchor)
-        fmt = QTextCharFormat()
-        fmt.clearBackground()
-        cursor.mergeCharFormat(fmt)
+        """清除全部搜索高亮（只清叠加层，不动文档）"""
         self.search_matches = []
         self.current_match_index = -1
+        self._log_text.setExtraSelections([])
+
+    def _apply_extra_selections(self):
+        """用 ExtraSelection 渲染高亮：当前项实心，其它项半透明"""
+        dim_format = QTextCharFormat()
+        dim_format.setBackground(QColor(tokens.rgba(tokens.DARK['search_highlight'], 0.32)))
+
+        current_format = QTextCharFormat()
+        current_format.setBackground(QColor(tokens.DARK['search_highlight']))
+        current_format.setForeground(QColor(tokens.DARK['search_text']))
+
+        document = self._log_text.document()
+        selections = []
+        for index, (start, length) in enumerate(self.search_matches):
+            cursor = QTextCursor(document)
+            cursor.setPosition(start)
+            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, length)
+
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cursor
+            selection.format = current_format if index == self.current_match_index else dim_format
+            selections.append(selection)
+
+        self._log_text.setExtraSelections(selections)
 
     def highlight_current_match(self):
-        """高亮当前匹配项"""
+        """重绘高亮并定位当前项"""
+        self._apply_extra_selections()
+        self._scroll_to_current()
+
+    def _scroll_to_current(self):
+        """把视图滚动到当前匹配项"""
         if not self.search_matches or self.current_match_index < 0:
             return
-
-        # 移除之前的高亮
-        cursor = self._log_text.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.End, cursor.KeepAnchor)
-        fmt = QTextCharFormat()
-        fmt.clearBackground()
-        cursor.mergeCharFormat(fmt)
-
-        # 高亮当前匹配项
-        cursor.setPosition(self.search_matches[self.current_match_index])
-        cursor.movePosition(cursor.Right, cursor.KeepAnchor, len(self.search_box.text()))
-        fmt.setBackground(QColor('#ffa502'))
-        fmt.setForeground(QColor('#000000'))
-        cursor.mergeCharFormat(fmt)
-
-        # 滚动到匹配项
+        start, length = self.search_matches[self.current_match_index]
+        cursor = QTextCursor(self._log_text.document())
+        cursor.setPosition(start)
+        cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, length)
         self._log_text.setTextCursor(cursor)
         self._log_text.ensureCursorVisible()
 
     def search_next(self):
-        """查找下一个匹配项"""
+        """下一个匹配项"""
         if not self.search_matches:
             return
-
         self.current_match_index = (self.current_match_index + 1) % len(self.search_matches)
-        total_matches = len(self.search_matches)
-        self.count_label.setText(f"{self.current_match_index + 1}/{total_matches}")
+        self._update_count()
         self.highlight_current_match()
 
     def search_previous(self):
-        """查找上一个匹配项"""
+        """上一个匹配项"""
         if not self.search_matches:
             return
-
         self.current_match_index = (self.current_match_index - 1) % len(self.search_matches)
-        total_matches = len(self.search_matches)
-        self.count_label.setText(f"{self.current_match_index + 1}/{total_matches}")
+        self._update_count()
         self.highlight_current_match()
+
+    def _update_count(self):
+        self.count_label.setText(f"{self.current_match_index + 1}/{len(self.search_matches)}")

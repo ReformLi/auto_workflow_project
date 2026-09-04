@@ -2,6 +2,8 @@
 
 # GUI框架
 PyQt5==5.15.11
+# 矢量图标库（工具栏/节点库/对话框图标，见 UI_DESIGN.md）
+QtAwesome==1.4.2
 # 节点图框架
 NodeGraphQt==0.6.44
 # 自动化库

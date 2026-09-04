@@ -17,6 +17,7 @@ class FindWindowNode(WorkflowNode):
     """开始节点"""
     __identifier__ = 'workflow'
     NODE_NAME = '查找窗口'
+    NODE_ICON = 'fa5s.window-restore'
     NODE_CATEGORY = "窗口操作"
 
     def __init__(self):
@@ -37,6 +38,7 @@ class FindWindowNode(WorkflowNode):
 class ActivateWindowNode(WorkflowNode):
     __identifier__ = 'workflow'
     NODE_NAME = "激活窗口"
+    NODE_ICON = 'fa5s.layer-group'
     NODE_CATEGORY = "窗口操作"
 
     def __init__(self):
