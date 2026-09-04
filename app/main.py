@@ -6,13 +6,37 @@
 
 import sys
 import logging
+from pathlib import Path
+
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 from app.config import APP_NAME, APP_VERSION
 from ui.main_window import WorkflowMainWindow
 from ui import qss
 from app.logger import setup_logging
+
+# 应用图标（按项目根定位，不依赖当前工作目录）
+APP_ICON_PATH = Path(__file__).resolve().parent.parent / 'resources' / 'icons' / 'app.ico'
+
+
+def setup_app_icon(app):
+    """设置窗口/任务栏图标；图标缺失时静默跳过，不影响启动"""
+    try:
+        if APP_ICON_PATH.exists():
+            app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
+    except Exception:
+        pass
+
+    # Windows：显式声明 AppUserModelID，避免任务栏按钮继承 python.exe 的图标
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                'ReformLi.AutoWorkflowDesigner.1')
+        except Exception:
+            pass
 
 
 def main():
@@ -24,6 +48,7 @@ def main():
     # 设置应用程序信息
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+    setup_app_icon(app)
 
     # 全局字体 + 全局样式表（唯一 QSS 入口，见 UI_DESIGN.md §6）
     qss.apply_font(app)

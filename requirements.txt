@@ -23,3 +23,5 @@ pyperclip==1.11.0
 
 # 使用 loguru 记录异常信息
 # pip install loguru
+
+QtAwesome==1.4.2
