@@ -40,9 +40,30 @@ _OPERATORS = {
 class SafeEvalError(Exception):
     pass
 
+# 允许调用的方法白名单（字符串 / 列表 / 字典等安全读操作）
+_SAFE_METHODS = {
+    # 字符串
+    'startswith', 'endswith', 'find', 'index', 'count', 'format', 'upper',
+    'lower', 'strip', 'lstrip', 'rstrip', 'split', 'rsplit', 'join',
+    'replace', 'isdigit', 'isalpha', 'isalnum', 'isspace', 'contains',
+    # 序列 / 映射
+    'get', 'keys', 'values', 'items', 'copy', 'tolist',
+}
+
+# 允许调用的内置函数白名单
+_SAFE_FUNCS = {
+    'len': len, 'abs': abs, 'min': min, 'max': max, 'sum': sum,
+    'all': all, 'any': any, 'str': str, 'int': int, 'float': float,
+    'bool': bool, 'round': round, 'sorted': sorted, 'range': range,
+    'isinstance': isinstance,
+}
+
 def safe_eval(expr: str, context: dict = None):
     """
-    安全地求值表达式，仅支持基本运算、比较、逻辑运算和变量访问。
+    安全地求值表达式，支持：
+    - 基本运算、比较、逻辑运算；
+    - 变量访问、属性访问（如 input.startswith）、下标（如 context['key']）；
+    - 白名单方法 / 内置函数调用。
     context 字典提供变量值。
     """
     if context is None:
@@ -50,13 +71,62 @@ def safe_eval(expr: str, context: dict = None):
     tree = ast.parse(expr, mode='eval')
     return _eval_node(tree.body, context)
 
+def _eval_call(node, context):
+    func = node.func
+    args = [_eval_node(a, context) for a in node.args]
+    kwargs = {}
+    for kw in node.keywords:
+        if kw.arg is None:
+            continue
+        kwargs[kw.arg] = _eval_node(kw.value, context)
+    if isinstance(func, ast.Attribute):
+        obj = _eval_node(func.value, context)
+        name = func.attr
+        if name not in _SAFE_METHODS:
+            raise SafeEvalError(f"不允许调用方法: {name}")
+        return getattr(obj, name)(*args, **kwargs)
+    if isinstance(func, ast.Name):
+        name = func.id
+        if name not in _SAFE_FUNCS:
+            raise SafeEvalError(f"不允许调用函数: {name}")
+        return _SAFE_FUNCS[name](*args, **kwargs)
+    raise SafeEvalError("不支持的调用")
+
 def _eval_node(node, context):
     if isinstance(node, ast.Constant):
         return node.value
+    elif isinstance(node, ast.List):
+        return [_eval_node(e, context) for e in node.elts]
+    elif isinstance(node, ast.Tuple):
+        return tuple(_eval_node(e, context) for e in node.elts)
+    elif isinstance(node, ast.Set):
+        return {_eval_node(e, context) for e in node.elts}
+    elif isinstance(node, ast.Dict):
+        keys = [_eval_node(k, context) for k in node.keys]
+        values = [_eval_node(v, context) for v in node.values]
+        return dict(zip(keys, values))
     elif isinstance(node, ast.Name):
         if node.id in context:
             return context[node.id]
         raise SafeEvalError(f"未定义的变量: {node.id}")
+    elif isinstance(node, ast.Attribute):
+        obj = _eval_node(node.value, context)
+        if node.attr.startswith('_'):
+            raise SafeEvalError(f"不允许访问私有属性: {node.attr}")
+        return getattr(obj, node.attr)
+    elif isinstance(node, ast.Subscript):
+        obj = _eval_node(node.value, context)
+        sl = node.slice
+        if isinstance(sl, ast.Index):      # Python3.8 兼容
+            sl = sl.value
+        if isinstance(sl, ast.Slice):
+            lower = _eval_node(sl.lower, context) if sl.lower else None
+            upper = _eval_node(sl.upper, context) if sl.upper else None
+            step = _eval_node(sl.step, context) if sl.step else None
+            return obj[slice(lower, upper, step)]
+        return obj[_eval_node(sl, context)]
+    elif isinstance(node, ast.Call):
+        return _eval_call(node, context)
     elif isinstance(node, ast.BinOp):
         left = _eval_node(node.left, context)
         right = _eval_node(node.right, context)

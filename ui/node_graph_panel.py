@@ -172,7 +172,9 @@ class NodeGraphPanel(QWidget):
         return None
 
     def _show_node_menu(self, node, view_pos):
-        """显示节点右键菜单（属性）"""
+        """显示节点右键菜单（属性；无属性的节点不显示）"""
+        if not node.get_property_defs():
+            return
         menu = QMenu(self.view)
         prop_action = menu.addAction(icons.icon('fa5s.edit', color='#4c8dff'), '属性')
         action = menu.exec_(self.view.mapToGlobal(view_pos))
@@ -180,8 +182,9 @@ class NodeGraphPanel(QWidget):
             self._open_properties(node)
 
     def _on_node_double_clicked(self, node):
-        """双击节点 → 打开属性页"""
-        self._open_properties(node)
+        """双击节点 → 打开属性页（无属性的节点不触发）"""
+        if node.get_property_defs():
+            self._open_properties(node)
 
     def _open_properties(self, node):
         """打开节点属性页弹窗（保持引用避免被回收）"""

@@ -61,6 +61,38 @@ class WorkflowNode(BaseNode, ABC):
         # 属性定义（供节点属性页渲染；不入节点体，节点图只显示节点本身）
         self._prop_defs = []
 
+        # 节点摘要文本（如条件表达式摘要），放在节点体下方，可选
+        sum_font = QtGui.QFont()
+        sum_font.setPointSize(7)
+        self.summary_text = QtWidgets.QGraphicsTextItem(self.view)  # type: ignore
+        self.summary_text.setFont(sum_font)
+        self.summary_text.document().setDefaultStyleSheet("div { margin:0; padding:0; }")
+        self.summary_text.setDefaultTextColor(QtGui.QColor(tokens.DARK['text_dim']))
+        self.summary_text.setVisible(False)
+
+    def set_summary(self, text):
+        """在节点体下方显示摘要文本（空串则隐藏）。"""
+        if not self.view:
+            return
+        self.summary_text.setPlainText(text)
+        self.summary_text.setVisible(bool(text))
+        if not text:
+            return
+        node_rect = self.view.boundingRect()
+        text_rect = self.summary_text.boundingRect()
+        x = 6
+        y = node_rect.height() - text_rect.height() - 6
+        self.summary_text.setPos(x, y)
+        self.summary_text.update()
+
+    def refresh_summary(self):
+        """子类可覆盖 _summary_text() 返回摘要；属性变化时调用以刷新。"""
+        self.set_summary(self._summary_text())
+
+    def _summary_text(self) -> str:
+        """节点摘要字符串，默认空。"""
+        return ''
+
     def _apply_visual_style(self):
         """按 NODE_CATEGORY / NODE_ICON 应用节点头部色与图标"""
         try:
@@ -141,6 +173,18 @@ class WorkflowNode(BaseNode, ABC):
         self._prop_defs.append({
             'name': name, 'label': label or name, 'kind': 'text',
             'value': text, 'items': None, 'capture': False,
+        })
+
+    def add_multiline_input(self, name, label='', text='', tooltip=None, tab=None):
+        """注册一个多行文本属性（表达式等），在属性页以多行编辑框展示。"""
+        self.create_property(
+            name, value=text,
+            widget_type=NodePropWidgetEnum.QTEXT_EDIT.value,
+            widget_tooltip=tooltip, tab=tab)
+        self._prop_defs.append({
+            'name': name, 'label': label or name, 'kind': 'text',
+            'multiline': True, 'value': text,
+            'items': None, 'capture': False,
         })
 
     def add_combo_menu(self, name, label='', items=None, tooltip=None, tab=None):

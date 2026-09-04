@@ -43,6 +43,10 @@ class WorkflowWorker(QObject):
                 event_bus.error_occurred.emit("未找到开始节点")
                 event_bus.execution_finished.emit(False)
                 return
+            # 运行时状态清零（如循环计数、执行标记），支持多次重新执行
+            for node in self.node_graph.all_nodes():
+                if hasattr(node, 'reset'):
+                    node.reset()
             self._execute_graph(start_node)
             event_bus.execution_finished.emit(True)
         except Exception as e:
@@ -55,6 +59,7 @@ class WorkflowWorker(QObject):
     def _execute_graph(self, start_node):
         node_outputs = {}
         current_node = start_node
+        inputs = self._collect_inputs(current_node, node_outputs)
         while current_node and not self._stop_flag:
             # 暂停检查
             while self._pause_flag and not self._stop_flag:
@@ -69,17 +74,32 @@ class WorkflowWorker(QObject):
 
             start_time = time.time()
             try:
-                inputs = self._collect_inputs(current_node, node_outputs)
                 outputs, next_port = current_node.execute(inputs)
                 elapsed = time.time() - start_time
                 node_outputs[current_node] = outputs
                 # 发射节点成功结束信号（传递节点ID和耗时）
                 event_bus.node_exec_finished.emit(node_id, elapsed, False)
                 event_bus.node_finished.emit(node_name, outputs)
-                # 根据 next_port 找到下一个节点
-                if next_port is None:
-                    break
-                current_node = self._get_next_node(current_node, next_port)
+
+                # 确定下一个节点
+                next_node = None
+                next_in_port = None
+                if next_port is not None:
+                    next_node, next_in_port = self._get_next_node(current_node, next_port)
+                trigger = inputs.get('__trigger__')
+                # 循环入口：循环体末尾回流（next 端口触发）时，重新触发对应循环判断节点
+                if (getattr(current_node, 'is_loop_entry', False)
+                        and trigger == 'next'):
+                    next_node = current_node.get_decision_node()
+                    next_in_port = None
+                current_node = next_node
+
+                # 为下一次迭代收集输入，并记录触发端口（供循环入口判断）
+                inputs = {}
+                if current_node is not None:
+                    inputs = self._collect_inputs(current_node, node_outputs)
+                    inputs['__trigger__'] = (
+                        next_in_port.name() if next_in_port is not None else None)
             except Exception as e:
                 elapsed = time.time() - start_time
                 event_bus.node_exec_finished.emit(node_id, elapsed, True)
@@ -107,14 +127,14 @@ class WorkflowWorker(QObject):
         return inputs
 
     def _get_next_node(self, node, port_name):
-        """根据节点和输出端口名获取下游连接的节点"""
+        """根据节点和输出端口名获取下游连接的节点及其输入端口"""
         for port in node.output_ports():
             if port.name() == port_name:
                 connections = port.connected_ports()
                 if connections:
-                    next_port = connections[0]
-                    return next_port.node()
-        return None
+                    next_input_port = connections[0]
+                    return next_input_port.node(), next_input_port
+        return None, None
 
     def _find_start_node(self):
         for node in self.node_graph.all_nodes():

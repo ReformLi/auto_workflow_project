@@ -100,7 +100,7 @@ class NodePropertiesDialog(QDialog):
         self._defs = node.get_property_defs()
 
         self.setWindowTitle(f"{node.name()} · 属性")
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(430)
         self.setAttribute(Qt.WA_DeleteOnClose, False)
         self._build_ui()
         self._apply_theme()
@@ -115,8 +115,18 @@ class NodePropertiesDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._vis_rows = []
         for d in self._defs:
-            self._add_prop_row(form, d)
+            pair = self._add_prop_row(form, d)
+            if d.get('vis_when') and pair:
+                self._vis_rows.append((d['vis_when'], pair[0], pair[1]))
+        self._wire_visibility()
+
+        # 特殊节点（查找图片）注入自定义属性编辑器
+        self.image_editor = None
+        if getattr(node, 'IMAGE_NODE', False):
+            from ui.node_image_widget import ImageNodeEditor
+            self.image_editor = ImageNodeEditor(node, self)
 
         ok_btn = QPushButton("确定")
         ok_btn.setStyleSheet(self._accent_button_style())
@@ -130,11 +140,17 @@ class NodePropertiesDialog(QDialog):
         layout.setSpacing(8)
         layout.addWidget(title)
         layout.addWidget(hint)
-        layout.addLayout(form)
+        if self.image_editor is not None:
+            layout.addWidget(self.image_editor)
+        else:
+            layout.addLayout(form)
         layout.addLayout(btns)
 
     def _add_prop_row(self, form, d):
+        """渲染一个属性行，返回 (label_widget, field_widget) 供 vis_when 显隐控制。"""
         name, kind, value, items = d['name'], d['kind'], d['value'], d['items']
+        label_w = QLabel(d['label'])
+
         if kind == 'combo':
             combo = QComboBox()
             combo.addItems([str(i) for i in (items or [])])
@@ -145,29 +161,71 @@ class NodePropertiesDialog(QDialog):
             combo.currentIndexChanged.connect(
                 lambda: self.node.set_property(name, combo.currentText()))
             self._widgets[name] = combo
-            form.addRow(QLabel(d['label']), combo)
-            return
-
-        edit = QLineEdit(str(value) if value is not None else '')
-        edit.textChanged.connect(
-            lambda text, n=name: self.node.set_property(n, text))
-        self._widgets[name] = edit
-
-        if d.get('capture'):
-            cap_btn = QPushButton("捕获")
-            cap_btn.setCursor(Qt.PointingHandCursor)
-            cap_btn.setStyleSheet(self._secondary_button_style())
-            cap_btn.setToolTip("点击后选择目标窗口，自动填入标题/类名/进程名")
-            cap_btn.clicked.connect(self._on_capture)
-            row = QHBoxLayout()
-            row.setSpacing(4)
-            row.addWidget(edit, 1)
-            row.addWidget(cap_btn)
-            holder = QWidget()
-            holder.setLayout(row)
-            form.addRow(QLabel(d['label']), holder)
+            field_w = combo
+        elif d.get('multiline'):
+            from PyQt5.QtWidgets import QPlainTextEdit
+            container = QWidget()
+            vbox = QVBoxLayout(container)
+            vbox.setContentsMargins(0, 0, 0, 0)
+            vbox.setSpacing(4)
+            edit = QPlainTextEdit(str(value) if value is not None else '')
+            edit.setMinimumHeight(90)
+            edit.textChanged.connect(
+                lambda: self.node.set_property(name, edit.toPlainText()))
+            self._widgets[name] = edit
+            vbox.addWidget(edit)
+            # 常用比较模板按钮
+            if d.get('templates'):
+                tbox = QHBoxLayout()
+                tbox.setSpacing(4)
+                for tlabel, tpl in d['templates']:
+                    btn = QPushButton(tlabel)
+                    btn.setCursor(Qt.PointingHandCursor)
+                    btn.setStyleSheet(self._secondary_button_style())
+                    btn.clicked.connect(
+                        lambda _=False, t=tpl: edit.setPlainText(t))
+                    tbox.addWidget(btn)
+                tbox.addStretch(1)
+                vbox.addLayout(tbox)
+            field_w = container
         else:
-            form.addRow(QLabel(d['label']), edit)
+            edit = QLineEdit(str(value) if value is not None else '')
+            edit.textChanged.connect(
+                lambda text, n=name: self.node.set_property(n, text))
+            self._widgets[name] = edit
+            if d.get('capture'):
+                cap_btn = QPushButton("捕获")
+                cap_btn.setCursor(Qt.PointingHandCursor)
+                cap_btn.setStyleSheet(self._secondary_button_style())
+                cap_btn.setToolTip("点击后选择目标窗口，自动填入标题/类名/进程名")
+                cap_btn.clicked.connect(self._on_capture)
+                row = QHBoxLayout()
+                row.setSpacing(4)
+                row.addWidget(edit, 1)
+                row.addWidget(cap_btn)
+                holder = QWidget()
+                holder.setLayout(row)
+                field_w = holder
+            else:
+                field_w = edit
+
+        form.addRow(label_w, field_w)
+        return label_w, field_w
+
+    def _wire_visibility(self):
+        """根据 mode 组合框的值联动显隐（vis_when=(mode属性, 期望值)）的字段行。"""
+        for (mode_prop, expected), label_w, field_w in self._vis_rows:
+            mode_w = self._widgets.get(mode_prop)
+            if not isinstance(mode_w, QComboBox):
+                continue
+
+            def sync(mp=mode_prop, exp=expected, lw=label_w, fw=field_w, mw=mode_w):
+                visible = mw.currentText() == exp
+                lw.setVisible(visible)
+                fw.setVisible(visible)
+
+            mode_w.currentIndexChanged.connect(lambda _=None: sync())
+            sync()  # 初始按当前值设置
 
     def _set_widget_value(self, name, value):
         w = self._widgets.get(name)
@@ -177,6 +235,8 @@ class NodePropertiesDialog(QDialog):
             idx = w.findText(str(value))
             if idx >= 0:
                 w.setCurrentIndex(idx)
+        elif hasattr(w, 'toPlainText'):
+            w.setPlainText(str(value) if value is not None else '')
         else:
             w.setText(str(value) if value is not None else '')
 
@@ -239,4 +299,18 @@ class NodePropertiesDialog(QDialog):
             }}
             QLineEdit:focus, QComboBox:focus {{ border:1px solid {accent}; }}
             QComboBox::drop-down {{ border:none; width:18px; }}
+            QDoubleSpinBox, QSpinBox {{
+                background:{elev}; color:{text};
+                border:1px solid {border}; border-radius:4px;
+                padding:2px 4px; min-height:22px;
+            }}
+            QDoubleSpinBox:focus, QSpinBox:focus {{ border:1px solid {accent}; }}
+            QGroupBox {{
+                color:{text}; font-weight:bold;
+                border:1px solid {border}; border-radius:6px;
+                margin-top:8px; padding-top:4px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; left:8px; padding:0 3px;
+            }}
         """)

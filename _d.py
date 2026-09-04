@@ -1,0 +1,15 @@
+import numpy as np, cv2
+yy, xx = np.mgrid[0:300, 0:400]
+screen = np.dstack([(30+xx//3).astype(np.uint8),(30+yy//3).astype(np.uint8),(40+(xx+yy)//5).astype(np.uint8)])
+cv2.rectangle(screen, (82,62), (110,100), (0,0,255), -1)
+t = screen[62:100, 82:110].copy()
+print('template shape', t.shape, 'std', np.std(t.astype(np.float32)))
+print('template unique counts', np.unique(t.reshape(-1,3),axis=0)[:5])
+print('screen[0:38,0:28] equals template?', np.array_equal(screen[0:38,0:28], t))
+print('screen[62:100,82:110] equals template?', np.array_equal(screen[62:100,82:110], t))
+res = cv2.matchTemplate(screen, t, cv2.TM_SQDIFF_NORMED)
+mn, mv, ml, mx = cv2.minMaxLoc(res)
+print('SQDIFF min_loc', ml, 'min', mv)
+res2 = cv2.matchTemplate(screen, t, cv2.TM_CCOEFF_NORMED)
+_, m2, _, l2 = cv2.minMaxLoc(res2)
+print('CCOEFF max_loc', l2, m2)
