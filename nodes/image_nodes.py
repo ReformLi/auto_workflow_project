@@ -47,6 +47,7 @@ class FindImageNode(WorkflowNode):
         self._register_storage('click_after', '0')   # 匹配后自动点击 0/1
         self._register_storage('tolerance', '40')    # 颜色定位逐通道容差
         self._register_storage('preprocess', '无')    # 模板匹配预处理：无/灰度/二值化
+        self._register_storage('bg_mode', '0')       # 后台离屏识别(PrintWindow) 0/1
 
     def _register_storage(self, name, value):
         """注册为可序列化的模型属性，但不进入属性页通用行（由 ImageNodeEditor 接管）。"""
@@ -122,8 +123,27 @@ class FindImageNode(WorkflowNode):
     def _should_click(self):
         return (self.get_property('click_after') or '0') in ('1', 'true', 'yes')
 
+    def _is_bg(self):
+        return (self.get_property('bg_mode') or '0') in ('1', 'true', 'yes')
+
+    def _resolve_bg_hwnd(self, inputs):
+        """后台离屏识别：校验并返回窗口句柄；未开启或未连窗口时按需抛错。"""
+        if not self._is_bg():
+            return None
+        window = inputs.get('窗口对象', None)
+        if window is None:
+            raise RuntimeError('后台离屏识别需要连接「窗口对象」输入端口')
+        hwnd = finder.hwnd_of(window)
+        if not hwnd:
+            raise RuntimeError('后台离屏识别无法解析窗口句柄')
+        return hwnd
+
     def _click_if_enabled(self, x, y):
         if not self._should_click():
+            return
+        if self._is_bg():
+            # 后台模式下坐标为客户区相对坐标，不能按屏幕绝对坐标真实点击；
+            # 真正的后台点击交给下游「鼠标点击」节点处理。
             return
         try:
             import pyautogui
@@ -134,6 +154,38 @@ class FindImageNode(WorkflowNode):
     def execute(self, inputs):
         mode = self.get_property('mode') or _MODES[0]
         region, window = self._resolve_search(inputs)
+        bg_hwnd = self._resolve_bg_hwnd(inputs)
+
+        if bg_hwnd is not None:
+            # ---------------- 后台离屏识别：结果坐标为【客户区相对坐标】 ----------------
+            if mode == '颜色定位':
+                points = self.get_colored_points()
+                if len(points) < 1:
+                    raise RuntimeError('颜色定位需要至少 1 个采集点，请在属性中执行「开始采集」')
+                tolerance = self._apply_tolerance()
+                hits, _size = finder.find_color_points_offscreen(
+                    bg_hwnd, points, tolerance=tolerance)
+                if not hits:
+                    raise RuntimeError('后台未找到匹配的颜色点组合（可增大容差）')
+                best = hits[0]
+                center = self._apply_offset(best['base_center'])
+                return {'坐标': center, '中心坐标': center,
+                        '匹配度': 1.0 - min(1.0, best['max_dev'] / 255.0)}, '坐标'
+
+            template = self.get_template()
+            if template is None:
+                raise RuntimeError('未设置模板图片：请粘贴 / 选择图片，或提供内嵌模板')
+            confidence = self._apply_threshold()
+            if self.get_property('preprocess') and self.get_property('preprocess') != '无':
+                template = self._preprocess(template)
+            results, _size = finder.find_on_window_offscreen(
+                bg_hwnd, template, confidence=confidence)
+            if not results:
+                raise RuntimeError('后台窗口内未找到匹配的模板（阈值 %.2f）' % confidence)
+            best = results[0]
+            center = self._apply_offset(best['center'])
+            return {'坐标': best['top_left'], '中心坐标': center,
+                    '匹配度': best['max_val']}, '坐标'
 
         if mode == '颜色定位':
             points = self.get_colored_points()

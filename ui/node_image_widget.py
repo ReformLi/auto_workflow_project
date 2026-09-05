@@ -393,6 +393,19 @@ class ImageNodeEditor(QGroupBox):
         opt.addStretch(1)
         root.addLayout(opt)
 
+        # 后台离屏识别（PrintWindow）
+        bg_row = QHBoxLayout()
+        self.bg_check = QCheckBox("后台离屏识别（PrintWindow 抓取目标窗口内容）")
+        self.bg_check.setToolTip(
+            "开启后使用 PrintWindow 离屏抓取「窗口对象」输入端口对应窗口的内容，"
+            "即使窗口被遮挡/最小化也能识别；输出坐标为【相对窗口客户区】坐标，"
+            "可直接连入「鼠标点击」的 coords（配合相对客户区 + 后台执行）。")
+        self.bg_check.setCursor(Qt.PointingHandCursor)
+        self.bg_check.stateChanged.connect(self._on_bg_toggle)
+        bg_row.addWidget(self.bg_check)
+        bg_row.addStretch(1)
+        root.addLayout(bg_row)
+
         # 测试识别
         self.btn_test = QPushButton("测试识别（在当前屏幕执行匹配）")
         self.btn_test.setCursor(Qt.PointingHandCursor)
@@ -450,6 +463,8 @@ class ImageNodeEditor(QGroupBox):
             self.preprocess_combo.setCurrentText(pre)
         self.click_after.setChecked(
             (self.node.get_property('click_after') or '0') in ('1', 'true', 'yes'))
+        self.bg_check.setChecked(
+            (self.node.get_property('bg_mode') or '0') in ('1', 'true', 'yes'))
         self.refresh()
         self._on_mode_changed(mode)
 
@@ -626,6 +641,9 @@ class ImageNodeEditor(QGroupBox):
 
     def _on_click_after(self, state):
         self.node.set_property('click_after', '1' if state == Qt.Checked else '0')
+
+    def _on_bg_toggle(self, state):
+        self.node.set_property('bg_mode', '1' if state == Qt.Checked else '0')
 
     # ---------------- 测试识别 ----------------
     def _on_test(self):

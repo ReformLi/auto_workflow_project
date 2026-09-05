@@ -27,6 +27,56 @@ def _screenshot_to_bgr(region=None):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 
+def _hwnd_of(window):
+    """把窗口对象/句柄统一解析为整数 hwnd；失败返回 None。"""
+    if isinstance(window, int):
+        return window
+    for attr in ('NativeWindowHandle', 'native_window_handle', 'handle'):
+        try:
+            return int(getattr(window, attr))
+        except Exception:
+            continue
+    try:
+        return int(window)
+    except Exception:
+        return None
+
+
+def capture_window_offscreen(hwnd):
+    """PrintWindow 离屏抓取窗口客户区内容，返回 (BGR ndarray, (w, h))。
+
+    与普通屏幕截图不同：直接让目标窗口离屏绘制到内存位图，
+    即使窗口被其他窗口遮挡或最小化，也能拿到它自身的内容（"后台识别"）。
+    失败或窗口不支持 PrintWindow 时返回 (None, (0, 0))。
+    """
+    import ctypes
+    try:
+        import win32gui
+        import win32ui
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        w = right - left
+        h = bottom - top
+        if w <= 0 or h <= 0:
+            return None, (0, 0)
+        hwnd_dc = win32gui.GetWindowDC(hwnd)
+        mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+        save_dc = mfc_dc.CreateCompatibleDC()
+        bmp = win32ui.CreateBitmap()
+        bmp.CreateCompatibleBitmap(mfc_dc, w, h)
+        save_dc.SelectObject(bmp)
+        # PW_RENDERFULLCONTENT = 0x2：捕获经 DWM 合成的完整内容（UWP/多数现代窗口）
+        ctypes.windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), 2)
+        arr = np.frombuffer(bmp.GetBitmapBits(True), np.uint8)
+        img_bgra = arr.reshape((h, w, 4))
+        bgr = img_bgra[:, :, :3].copy()  # BGRA → BGR
+        save_dc.DeleteDC()
+        mfc_dc.DeleteDC()
+        win32gui.ReleaseDC(hwnd, hwnd_dc)
+        return bgr, (w, h)
+    except Exception:
+        return None, (0, 0)
+
+
 class ImageFinder:
     """基于图像模板/颜色点的定位器"""
 
@@ -163,6 +213,43 @@ class ImageFinder:
             cx, cy = r['center']
             r['center'] = (cx + left, cy + top)
         return results
+
+    # ---------------- 后台离屏识别（PrintWindow） ----------------
+    def hwnd_of(self, window):
+        """统一解析窗口句柄。"""
+        return _hwnd_of(window)
+
+    def capture_window_offscreen(self, window_or_hwnd):
+        """离屏抓取窗口客户区，返回 (BGR ndarray, (w, h))。"""
+        return capture_window_offscreen(_hwnd_of(window_or_hwnd))
+
+    def find_on_window_offscreen(self, window_or_hwnd, template_img,
+                                 confidence=None, count=1):
+        """PrintWindow 离屏抓窗口客户区做模板匹配。
+
+        结果坐标基于【客户区】原点（左上角为 0,0），可直接用于「鼠标点击」的
+        「相对窗口客户区」后台点击。
+        """
+        hwnd = _hwnd_of(window_or_hwnd)
+        if not hwnd:
+            raise RuntimeError('后台识别需要有效的窗口句柄')
+        img, (w, h) = capture_window_offscreen(hwnd)
+        if img is None or img.size == 0:
+            raise RuntimeError('后台离屏抓取窗口内容失败（窗口可能不支持 PrintWindow）')
+        results = self.match_from_array(img, template_img, confidence, count=count)
+        return results, (w, h)
+
+    def find_color_points_offscreen(self, window_or_hwnd, points,
+                                    tolerance=30, count=1):
+        """离屏窗口客户区内颜色定位，结果坐标基于客户区。"""
+        hwnd = _hwnd_of(window_or_hwnd)
+        if not hwnd:
+            raise RuntimeError('后台识别需要有效的窗口句柄')
+        img, (w, h) = capture_window_offscreen(hwnd)
+        if img is None or img.size == 0:
+            raise RuntimeError('后台离屏抓取窗口内容失败（窗口可能不支持 PrintWindow）')
+        hits = self.find_color_points(points, tolerance, screen_img=img, count=count)
+        return hits, (w, h)
 
     # ---------------- 颜色定位 ----------------
     @staticmethod
