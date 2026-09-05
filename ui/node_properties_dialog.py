@@ -10,7 +10,7 @@ import logging
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QComboBox, QDialog, QFormLayout, QHBoxLayout, QLineEdit,
+    QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLineEdit,
     QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -126,8 +126,12 @@ class NodePropertiesDialog(QDialog):
         self._vis_rows = []
         for d in self._defs:
             pair = self._add_prop_row(form, d)
-            if d.get('vis_when') and pair:
-                self._vis_rows.append((d['vis_when'], pair[0], pair[1]))
+            if not pair:
+                continue
+            label_w, field_w = pair
+            form.addRow(label_w, field_w)
+            if d.get('vis_when'):
+                self._vis_rows.append((d['vis_when'], label_w, field_w))
         self._wire_visibility()
 
         # 特殊节点（查找图片 / OCR）注入自定义属性编辑器
@@ -138,6 +142,9 @@ class NodePropertiesDialog(QDialog):
         elif getattr(self.node, 'OCR_NODE', False):
             from ui.node_ocr_widget import OcrNodeEditor
             self.image_editor = OcrNodeEditor(self.node, self)
+        elif getattr(self.node, 'MOUSE_NODE', False):
+            from ui.node_mouse_widget import MouseClickEditor
+            self.image_editor = MouseClickEditor(self.node, self)
 
         ok_btn = QPushButton("确定")
         ok_btn.setStyleSheet(self._accent_button_style())
@@ -161,6 +168,15 @@ class NodePropertiesDialog(QDialog):
         """渲染一个属性行，返回 (label_widget, field_widget) 供 vis_when 显隐控制。"""
         name, kind, value, items = d['name'], d['kind'], d['value'], d['items']
         label_w = QLabel(d['label'])
+
+        if kind == 'check':
+            cb = QCheckBox(d['label'])
+            cb.setChecked(str(value) in ('1', 'true', 'True'))
+            cb.toggled.connect(
+                lambda on, n=name: self.node.set_property(n, '1' if on else '0'))
+            self._widgets[name] = cb
+            # 复选框跨两列独占一行，不入 _vis_rows
+            return None  # 由调用方跳过 addRow；此处不返回成对控件
 
         if kind == 'combo':
             combo = QComboBox()
@@ -316,6 +332,13 @@ class NodePropertiesDialog(QDialog):
                 padding:2px 4px; min-height:22px;
             }}
             QDoubleSpinBox:focus, QSpinBox:focus {{ border:1px solid {accent}; }}
+            QCheckBox {{ color:{text}; spacing:6px; }}
+            QCheckBox::indicator {{
+                width:16px; height:16px;
+                border:1px solid {border}; border-radius:3px;
+                background:{elev};
+            }}
+            QCheckBox::indicator:checked {{ background:{accent}; border-color:{accent}; }}
             QGroupBox {{
                 color:{text}; font-weight:bold;
                 border:1px solid {border}; border-radius:6px;

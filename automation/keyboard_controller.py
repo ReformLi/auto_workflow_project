@@ -32,6 +32,7 @@ VK_CODE = {
     'y': 0x59, 'z': 0x5A, 'f1': 0x70, 'f2': 0x71, 'f3': 0x72,
     'f4': 0x73, 'f5': 0x74, 'f6': 0x75, 'f7': 0x76, 'f8': 0x77,
     'f9': 0x78, 'f10': 0x79, 'f11': 0x7A, 'f12': 0x7B,
+    'win': 0x5B, 'lwin': 0x5B, 'rwin': 0x5C, 'menu': 0x5D,
     'num_lock': 0x90, 'scroll_lock': 0x91, ';': 0xBA, '=': 0xBB,
     ',': 0xBC, '-': 0xBD, '.': 0xBE, '/': 0xBF, '`': 0xC0,
     '[': 0xDB, '\\': 0xDC, ']': 0xDD, "'": 0xDE
@@ -83,6 +84,33 @@ class KeyboardController:
         time.sleep(self.default_delay)
 
     # ========== 文本输入（全局） ==========
+    def hotkey_to_hwnd(self, hwnd: int, *keys, duration: float = 0.05):
+        """后台组合键：直接向窗口发送 WM_KEYDOWN / WM_KEYUP（含修饰键按序按下/释放）。"""
+        for k in keys:
+            vk = self._get_vk(k)
+            self._send_key_to_window(hwnd, vk, True)
+            time.sleep(0.02)
+        for k in reversed(keys):
+            vk = self._get_vk(k)
+            self._send_key_to_window(hwnd, vk, False)
+            time.sleep(0.02)
+        time.sleep(self.default_delay)
+
+    def paste_to_window(self, hwnd: int, text: str, restore: bool = True):
+        """后台粘贴：写入剪贴板后向窗口发送 Ctrl+V；restore=True 时粘贴后恢复原剪贴板。"""
+        old = None
+        if restore:
+            try:
+                old = pyperclip.paste()
+            except Exception:
+                old = None
+        pyperclip.copy(text)
+        time.sleep(0.05)
+        self.hotkey_to_hwnd(hwnd, 'ctrl', 'v')
+        if restore and old is not None:
+            pyperclip.copy(old)
+
+
     def type_text(self, text: str, interval: float = 0.02):
         """
         自动选择最佳全局输入方式：

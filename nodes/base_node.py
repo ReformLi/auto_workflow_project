@@ -200,6 +200,18 @@ class WorkflowNode(BaseNode, ABC):
             'capture': False,
         })
 
+    def add_bool_option(self, name, label='', default=False, tooltip=None, tab=None):
+        """注册一个布尔（复选）属性：'1' 为开启，'0' 为关闭。"""
+        val = '1' if default else '0'
+        self.create_property(
+            name, value=val,
+            widget_type=NodePropWidgetEnum.QCHECK_BOX.value,
+            widget_tooltip=tooltip, tab=tab)
+        self._prop_defs.append({
+            'name': name, 'label': label or name, 'kind': 'check',
+            'value': val, 'items': None, 'capture': False,
+        })
+
     def mark_property_capture(self, name):
         """把指定属性标记为支持'捕获'（在属性页对应输入框旁渲染捕获按钮）。"""
         for d in self._prop_defs:
@@ -218,7 +230,33 @@ class WorkflowNode(BaseNode, ABC):
         # 特殊节点（查找图片 / OCR 识别 等）使用自定义属性编辑器，
         # 属性不进入 _prop_defs，但必须保证有属性页（否则双击/右键不弹窗）。
         if not defs and (getattr(self, 'IMAGE_NODE', False)
-                         or getattr(self, 'OCR_NODE', False)):
+                         or getattr(self, 'OCR_NODE', False)
+                         or getattr(self, 'MOUSE_NODE', False)):
             defs.append({'name': '_custom', 'label': '属性', 'kind': 'text',
                          'value': '', 'items': None, 'capture': False})
         return defs
+
+    # ---------------- 前置 / 后置等待（通用属性方法） ----------------
+    def _add_wait_properties(self, include_pre=True, include_post=True):
+        """注册前置(pre_wait) / 后置(post_wait) 等待属性（单位：秒，默认 0）。"""
+        if include_pre:
+            self.add_text_input('pre_wait', '前置等待(秒)', '0',
+                                placeholder_text='执行前等待，0 表示不等待')
+        if include_post:
+            self.add_text_input('post_wait', '后置等待(秒)', '0',
+                                placeholder_text='执行后等待，0 表示不等待')
+
+    @staticmethod
+    def _wait_seconds(wait_value):
+        try:
+            return max(0.0, float(wait_value or '0'))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _apply_wait(self, inputs=None, wait_prop='pre_wait'):
+        """按指定等待属性阻塞等待；wait_prop 为 'pre_wait' 或 'post_wait'。"""
+        secs = self._wait_seconds(self.get_property(wait_prop)
+                                  if hasattr(self, 'get_property') else None)
+        if secs > 0:
+            import time
+            time.sleep(secs)

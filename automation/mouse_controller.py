@@ -52,10 +52,29 @@ def _send_input(*inputs):
     user32.SendInput(n, arr, ctypes.sizeof(INPUT))
 
 class MouseController:
-    """准确、无DPI困扰的鼠标控制器"""
+    """准确、无DPI困扰的鼠标控制器（前台 SendInput + 后台 PostMessage）"""
 
     def __init__(self, default_delay: float = 0.05):
         self.default_delay = default_delay
+
+    # ---------------- 屏幕/客户区坐标转换 ----------------
+    @staticmethod
+    def screen_to_client(hwnd, pt):
+        """屏幕绝对坐标 → 客户区坐标（hwnd 客户区左上角为原点）。"""
+        try:
+            import win32gui
+            return win32gui.ScreenToClient(hwnd, (int(pt[0]), int(pt[1])))
+        except Exception:
+            return None
+
+    @staticmethod
+    def client_to_screen(hwnd, pt):
+        """客户区坐标 → 屏幕绝对坐标。"""
+        try:
+            import win32gui
+            return win32gui.ClientToScreen(hwnd, (int(pt[0]), int(pt[1])))
+        except Exception:
+            return None
 
     def _ensure_coords(self, target):
         # ... 与之前相同，将目标转为 (x, y) 屏幕物理坐标 ...
@@ -115,6 +134,42 @@ class MouseController:
 
     def right_click(self, target=None):
         self.click(target, button='right')
+
+    # ---------------- 后台点击（PostMessage 合成） ----------------
+    # 消息与按键修饰常量
+    _BK_DOWN = {'left': 0x0201, 'right': 0x0204, 'middle': 0x0207}
+    _MK = {'left': 0x0001, 'right': 0x0002, 'middle': 0x0010}
+    _WM_MOUSEMOVE = 0x0200
+
+    @staticmethod
+    def _lparam(x, y):
+        """打包 loword=x, hiword=y 的 lParam（坐标相对客户区左上角）。"""
+        return (int(y) << 16) | (int(x) & 0xffff)
+
+    def click_background(self, hwnd, x, y, button='left', clicks=1, interval=0.1):
+        """向目标窗口发送合成鼠标点击（不抢焦点、不移动真实鼠标）。
+
+        Args:
+            hwnd: 目标窗口句柄。
+            x, y: 相对 thwnd 客户区左上角的坐标。
+            button: left / right / middle。
+            clicks: 点击次数（1=单击，2=双击）。
+            interval: 两次点击之间间隔（秒）。
+        """
+        if button not in self._BK_DOWN:
+            raise ValueError(f"不支持的按钮: {button}")
+        down_msg = self._BK_DOWN[button]
+        up_msg = down_msg + 1
+        mk = self._MK[button]
+        for i in range(clicks):
+            # 先发 MOVE 再 down/up，尽量贴近真实消息序列
+            user32.PostMessageW(hwnd, self._WM_MOUSEMOVE, mk, self._lparam(x, y))
+            user32.PostMessageW(hwnd, down_msg, mk, self._lparam(x, y))
+            time.sleep(0.02)
+            user32.PostMessageW(hwnd, up_msg, mk, self._lparam(x, y))
+            if i < clicks - 1:
+                time.sleep(interval)
+        time.sleep(self.default_delay)
 
     def drag(self, start, end, duration=0.5, button='left'):
         x1, y1 = self._ensure_coords(start)
