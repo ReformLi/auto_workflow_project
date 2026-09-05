@@ -6,10 +6,11 @@
 
 import sys
 import logging
+import os
 from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, qInstallMessageHandler, QtMsgType
 from PyQt5.QtGui import QIcon
 
 from app.config import APP_NAME, APP_VERSION
@@ -39,6 +40,25 @@ def setup_app_icon(app):
             pass
 
 
+def setup_qt_message_handler():
+    """把 Qt 的 qDebug/qWarning/qCritical/qFatal 转发到 Python 日志，
+    便于定位 Qt 断言/致命错误（0xC0000409 崩溃前最后一条消息）。"""
+
+    def handler(msg_type, context, message):
+        if msg_type == QtMsgType.QtDebugMsg:
+            logging.getLogger('qt').debug(message)
+        elif msg_type == QtMsgType.QtWarningMsg:
+            logging.getLogger('qt').warning(message)
+        elif msg_type == QtMsgType.QtCriticalMsg:
+            logging.getLogger('qt').error(message)
+        elif msg_type == QtMsgType.QtFatalMsg:
+            # 记录致命消息后按 Qt 默认行为终止，保留崩溃现场
+            logging.getLogger('qt').critical('QtFatal: %s', message)
+            os.abort()
+
+    qInstallMessageHandler(handler)
+
+
 def main():
     """主函数"""
     # 设置应用程序
@@ -63,6 +83,9 @@ def main():
     # 设置日志
     setup_logging()
     logger = logging.getLogger(__name__)
+
+    # 转发 Qt 消息到日志（崩溃前定位致命断言）
+    setup_qt_message_handler()
 
     try:
         # 创建主窗口

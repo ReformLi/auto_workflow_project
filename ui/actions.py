@@ -71,13 +71,16 @@ def build_tool_bar(window):
     window.addToolBar(tool_bar)
     window.tool_bar = tool_bar
 
-    # ── 文件组 ───────────────────────────────────────
-    tool_bar.addAction(_action(window, '新建', Icon.NEW, 'Ctrl+N',
-                               window.file_actions.new_workflow, '新建工作流 (Ctrl+N)'))
-    tool_bar.addAction(_action(window, '打开', Icon.OPEN, 'Ctrl+O',
-                               window.file_actions.open_workflow, '打开工作流文件 (Ctrl+O)'))
-    tool_bar.addAction(_action(window, '保存', Icon.SAVE, 'Ctrl+S',
-                               window.file_actions.save_workflow, '保存工作流 (Ctrl+S)'))
+    # ── 文件组（新建/打开/保存动作挂到 window，供菜单栏复用，避免重复快捷键） ──
+    window.new_action = _action(window, '新建', Icon.NEW, 'Ctrl+N',
+                                window.file_actions.new_workflow, '新建工作流 (Ctrl+N)')
+    window.open_action = _action(window, '打开', Icon.OPEN, 'Ctrl+O',
+                                 window.file_actions.open_workflow, '打开工作流文件 (Ctrl+O)')
+    window.save_action = _action(window, '保存', Icon.SAVE, 'Ctrl+S',
+                                 window.file_actions.save_workflow, '保存工作流 (Ctrl+S)')
+    tool_bar.addAction(window.new_action)
+    tool_bar.addAction(window.open_action)
+    tool_bar.addAction(window.save_action)
     tool_bar.addSeparator()
 
     # ── 编辑组 ───────────────────────────────────────
@@ -124,13 +127,11 @@ def build_menu_bar(window):
     menu_bar = window.menuBar()
 
     # ── 文件 ─────────────────────────────────────────
+    # 新建/打开/保存复用工具栏创建的 action（避免相同快捷键歧义，状态自动同步）
     file_menu = menu_bar.addMenu('文件')
-    file_menu.addAction(_action(window, '新建', Icon.NEW, 'Ctrl+N',
-                                window.file_actions.new_workflow, '新建工作流 (Ctrl+N)'))
-    file_menu.addAction(_action(window, '打开', Icon.OPEN, 'Ctrl+O',
-                                window.file_actions.open_workflow, '打开工作流文件 (Ctrl+O)'))
-    file_menu.addAction(_action(window, '保存', Icon.SAVE, 'Ctrl+S',
-                                window.file_actions.save_workflow, '保存工作流 (Ctrl+S)'))
+    file_menu.addAction(window.new_action)
+    file_menu.addAction(window.open_action)
+    file_menu.addAction(window.save_action)
     file_menu.addAction(_action(window, '另存为', Icon.SAVE, 'Ctrl+Shift+S',
                                 window.file_actions.save_workflow_as, '另存为 (Ctrl+Shift+S)'))
     file_menu.addSeparator()
@@ -151,10 +152,10 @@ def build_menu_bar(window):
 
     # ── 运行（复用工具栏 QAction，可用态与文案自动同步） ──
     run_menu = menu_bar.addMenu('运行')
-    run_menu.addAction(_action(window, '执行工作流', Icon.RUN, 'F5',
+    # 只去掉重复快捷键（F5 已由下方 start_action 占用；F6 直接复用工具栏 validate_action）
+    run_menu.addAction(_action(window, '执行工作流', Icon.RUN, None,
                                window.execution.execute_workflow, '验证通过后立即执行'))
-    run_menu.addAction(_action(window, '验证工作流', Icon.VALIDATE, 'F6',
-                               window.execution.validate_workflow, '校验工作流结构'))
+    run_menu.addAction(window.validate_action)
     run_menu.addSeparator()
     run_menu.addAction(window.start_action)
     run_menu.addAction(window.pause_action)

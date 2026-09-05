@@ -105,6 +105,14 @@ class NodePropertiesDialog(QDialog):
         self._build_ui()
         self._apply_theme()
 
+    def closeEvent(self, event):
+        """关闭前等待测试线程结束，避免 QThread 运行中销毁导致 Qt 崩溃。"""
+        ed = getattr(self, 'image_editor', None)
+        thread = getattr(ed, '_thread', None) if ed is not None else None
+        if thread is not None and thread.isRunning():
+            thread.wait(3000)
+        super(NodePropertiesDialog, self).closeEvent(event)
+
     def _build_ui(self):
         title = QLabel(f"{self.node.name()} · 属性")
         title.setStyleSheet(
@@ -122,11 +130,14 @@ class NodePropertiesDialog(QDialog):
                 self._vis_rows.append((d['vis_when'], pair[0], pair[1]))
         self._wire_visibility()
 
-        # 特殊节点（查找图片）注入自定义属性编辑器
+        # 特殊节点（查找图片 / OCR）注入自定义属性编辑器
         self.image_editor = None
-        if getattr(node, 'IMAGE_NODE', False):
+        if getattr(self.node, 'IMAGE_NODE', False):
             from ui.node_image_widget import ImageNodeEditor
-            self.image_editor = ImageNodeEditor(node, self)
+            self.image_editor = ImageNodeEditor(self.node, self)
+        elif getattr(self.node, 'OCR_NODE', False):
+            from ui.node_ocr_widget import OcrNodeEditor
+            self.image_editor = OcrNodeEditor(self.node, self)
 
         ok_btn = QPushButton("确定")
         ok_btn.setStyleSheet(self._accent_button_style())

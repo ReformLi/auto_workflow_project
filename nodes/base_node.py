@@ -214,4 +214,11 @@ class WorkflowNode(BaseNode, ABC):
             val = self.get_property(d['name'])
             if val is not None:
                 d['value'] = val
-        return list(self._prop_defs)
+        defs = list(self._prop_defs)
+        # 特殊节点（查找图片 / OCR 识别 等）使用自定义属性编辑器，
+        # 属性不进入 _prop_defs，但必须保证有属性页（否则双击/右键不弹窗）。
+        if not defs and (getattr(self, 'IMAGE_NODE', False)
+                         or getattr(self, 'OCR_NODE', False)):
+            defs.append({'name': '_custom', 'label': '属性', 'kind': 'text',
+                         'value': '', 'items': None, 'capture': False})
+        return defs

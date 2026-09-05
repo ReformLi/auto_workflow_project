@@ -50,9 +50,10 @@ class FileActions:
         self.logger.info('新建工作流')
 
     def open_workflow(self):
-        """打开工作流"""
+        """打开工作流（.awflow 打包格式 或 .json 旧格式）"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self.window, '打开工作流文件', '', 'JSON文件 (*.json);;所有文件 (*.*)'
+            self.window, '打开工作流文件', '',
+            '工作流文件 (*.awflow *.json);;JSON文件 (*.json);;所有文件 (*.*)'
         )
         if file_path:
             try:
@@ -79,14 +80,21 @@ class FileActions:
         return False
 
     def save_workflow_as(self):
-        """另存为工作流"""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self.window, '保存工作流文件', '', 'JSON文件 (*.json);;所有文件 (*.*)'
+        """另存为工作流（默认 .awflow 打包格式，可选导出为 .json + 外部资源文件夹）"""
+        filters = '工作流文件 (*.awflow);;JSON文件 (*.json)'
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self.window, '保存工作流文件', '', filters
         )
-        if file_path:
-            self.current_file = file_path
-            return self.save_workflow()
-        return False
+        if not file_path:
+            return False
+        # 根据所选过滤器补全扩展名
+        if 'JSON文件' in selected_filter:
+            if not file_path.lower().endswith('.json'):
+                file_path += '.json'
+        elif not file_path.lower().endswith('.awflow'):
+            file_path += '.awflow'
+        self.current_file = file_path
+        return self.save_workflow()
 
     def clear_workflow(self):
         """清空工作流"""
