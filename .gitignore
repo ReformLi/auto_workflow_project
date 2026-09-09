@@ -35,4 +35,6 @@ Thumbs.db
 # --- 7. 测试文件 ---
 tests/
 *.json
+*.awflow
 .trae/
+.workbuddy/

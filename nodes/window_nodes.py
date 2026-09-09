@@ -105,6 +105,7 @@ class FindWindowNode(_WindowSearchMixin, WorkflowNode):
         self.add_input('in')
         self.add_output('窗口对象')
         self.add_output('窗口句柄')
+        self.add_fail_output()   # 失败分支：未找到窗口等异常时可接补救流程
         self._add_search_properties()
 
     def execute(self, inputs):
@@ -124,6 +125,7 @@ class ActivateWindowNode(_WindowSearchMixin, WorkflowNode):
         super().__init__()
         self.add_input('窗口对象')
         self.add_output('out')
+        self.add_fail_output()   # 失败分支：激活失败时可接补救流程
         self._add_title_property(title_label='窗口标题(未连上游时)')
 
     def execute(self, inputs):

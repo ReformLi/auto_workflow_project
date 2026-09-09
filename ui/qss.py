@@ -215,6 +215,12 @@ QWidget#dockTitleBar {{
     background-color: {BG_PANEL};
     border-bottom: 1px solid {BORDER};
 }}
+/* 属性悬浮层（覆盖在画布右侧，不参与分割器布局） */
+QWidget#propertiesPanelHost {{
+    background-color: {BG_PANEL};
+    border: 1px solid {BORDER_S};
+    border-radius: 6px;
+}}
 QLabel#dockTitleText {{
     color: {TEXT2};
     font-size: {tokens.FONT_SIZE_UI}pt;

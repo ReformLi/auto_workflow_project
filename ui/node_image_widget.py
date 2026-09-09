@@ -56,6 +56,7 @@ class PointColorPicker(QWidget):
         screen = QtGui.QGuiApplication.primaryScreen().availableGeometry()
         hint.move(screen.center().x() - hint.width() // 2, screen.top() + 40)
         if self._hint:
+            self._hint.hide()       # 先隐藏：可见控件 setParent(None) 会闪现顶层窗口
             self._hint.setParent(None)
             self._hint.deleteLater()
         hint.show()
@@ -350,52 +351,56 @@ class ImageNodeEditor(QGroupBox):
         cbox.addLayout(tol_row)
         root.addWidget(self.color_box)
 
-        # 参数：阈值 / 偏移
-        param = QHBoxLayout()
-        param.addWidget(QLabel("阈值"))
+        # 参数：阈值（独占一行，窄面板下避免挤压）
+        trow = QHBoxLayout()
+        trow.addWidget(QLabel("阈值"))
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(0.0, 1.0)
         self.threshold_spin.setSingleStep(0.05)
         self.threshold_spin.setDecimals(2)
         self.threshold_spin.setValue(0.8)
         self.threshold_spin.valueChanged.connect(self._on_threshold)
-        param.addWidget(self.threshold_spin)
-        param.addSpacing(12)
-        param.addWidget(QLabel("偏移 X"))
+        trow.addWidget(self.threshold_spin, 1)
+        trow.addStretch(1)
+        root.addLayout(trow)
+
+        # 参数：偏移 X / Y
+        orow = QHBoxLayout()
+        orow.addWidget(QLabel("偏移 X"))
         self.offset_x = QSpinBox()
         self.offset_x.setRange(-2000, 2000)
         self.offset_x.valueChanged.connect(
             lambda v: self.node.set_property('offset_x', str(v)))
-        param.addWidget(self.offset_x)
-        param.addWidget(QLabel("Y"))
+        orow.addWidget(self.offset_x, 1)
+        orow.addSpacing(12)
+        orow.addWidget(QLabel("Y"))
         self.offset_y = QSpinBox()
         self.offset_y.setRange(-2000, 2000)
         self.offset_y.valueChanged.connect(
             lambda v: self.node.set_property('offset_y', str(v)))
-        param.addWidget(self.offset_y)
-        param.addStretch(1)
-        root.addLayout(param)
+        orow.addWidget(self.offset_y, 1)
+        root.addLayout(orow)
 
-        # 预处理 + 命中后自动点击
-        opt = QHBoxLayout()
-        opt.addWidget(QLabel("预处理"))
+        # 预处理（独占一行）
+        prow = QHBoxLayout()
+        prow.addWidget(QLabel("预处理"))
         self.preprocess_combo = QComboBox()
         self.preprocess_combo.addItems(['无', '灰度', '二值化'])
         self.preprocess_combo.currentTextChanged.connect(self._on_preprocess)
         self.preprocess_combo.setToolTip("灰度/二值化可增强特定场景的匹配效果")
-        opt.addWidget(self.preprocess_combo)
-        opt.addSpacing(16)
+        prow.addWidget(self.preprocess_combo, 1)
+        root.addLayout(prow)
+
+        # 命中后自动点击（独占一行）
         self.click_after = QCheckBox("命中后自动点击")
         self.click_after.setToolTip("识别成功后自动在偏移后的中心坐标处点击")
         self.click_after.setCursor(Qt.PointingHandCursor)
         self.click_after.stateChanged.connect(self._on_click_after)
-        opt.addWidget(self.click_after)
-        opt.addStretch(1)
-        root.addLayout(opt)
+        root.addWidget(self.click_after)
 
         # 后台离屏识别（PrintWindow）
         bg_row = QHBoxLayout()
-        self.bg_check = QCheckBox("后台离屏识别（PrintWindow 抓取目标窗口内容）")
+        self.bg_check = QCheckBox("后台离屏识别（PrintWindow）")
         self.bg_check.setToolTip(
             "开启后使用 PrintWindow 离屏抓取「窗口对象」输入端口对应窗口的内容，"
             "即使窗口被遮挡/最小化也能识别；输出坐标为【相对窗口客户区】坐标，"

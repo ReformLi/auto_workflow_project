@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 主窗口类
-布局结构（见 UI_DESIGN.md §4）：
+布局结构（见 UI_DESIGN.md §4 / §10）：
     中央部件
     └── 垂直分割器
-        ├── 水平分割器（左：节点库面板 | 右：节点图画布）
+        ├── 水平分割器（左：节点库面板 | 中：节点图画布）
         └── 日志面板
+    属性面板 = 画布上的悬浮层（不参与分割器，出现/消失不影响其他视图）
 样式统一由 app/main.py 的全局 QSS 提供，本文件不再 setStyleSheet。
 """
 
 import logging
 
-from PyQt5 import QtWidgets
-from PyQt5.QtCore import Qt, QTimer, QEvent
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget,
@@ -31,12 +32,30 @@ from ui.log_filter_bar import LogFilterBar
 from ui.log_panel import TextEditHandler
 from ui.log_search_bar import LogSearchBar
 from ui.node_graph_panel import NodeGraphPanel
+from ui.node_properties_panel import NodePropertiesPanel
 from ui.nodes_panel import NodeLibraryWidget
 from ui.settings_dialog import SettingsDialog
 from ui.about_dialog import AboutDialog
 from ui.status_bar import StatusBarView
 from ui.theme import ThemeState
-from ui.title_bar import DockTitleBar
+from ui.title_bar import DockTitleBar, PanelStrip
+
+PROPERTIES_WIDTH = 340      # 属性面板默认宽度（图片/鼠标编辑器行控件的最小舒适宽度）
+
+
+class _PopupProbe(QtCore.QObject):
+    """临时诊断探针：任何控件以独立顶层窗口显示时记录日志（见 _install_popup_probe）"""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Show:
+            try:
+                if obj.isWidgetType() and obj.isWindow():
+                    logging.getLogger(__name__).info(
+                        f'[弹框探针] 显示独立窗口: {type(obj).__name__} '
+                        f'"{obj.objectName()}"')
+            except RuntimeError:
+                pass        # 控件可能已被销毁
+        return False
 
 
 class WorkflowMainWindow(QMainWindow):
@@ -64,13 +83,25 @@ class WorkflowMainWindow(QMainWindow):
         # 缩放基准：高 DPI 下视图初始变换不为 1.0，首次布局完成后捕获
         self._zoom_baseline = 1.0
         self._zoom_baseline_captured = False
+        # 各面板从收起条展开时的目标尺寸（host -> px）
+        self._panel_restore_sizes = {}
 
         # 初始化 UI（顺序：面板 → 工具栏 → 菜单 → 状态栏）
         self.setup_ui()
         self.setup_logging()
         self._connect_event_bus()
+        self._install_popup_probe()
 
         self.logger.info('主窗口初始化完成')
+
+    def _install_popup_probe(self):
+        """
+        临时诊断：全局监听"任何控件以独立窗口形式显示"的事件并写入日志。
+        用于定位属性面板打开时"瞬间闪现的弹框"到底是什么——
+        复现一次后从日志里搜「弹框探针」即可；问题确认后整体移除本方法与 _PopupProbe。
+        """
+        self._popup_probe = _PopupProbe(self)
+        QtWidgets.QApplication.instance().installEventFilter(self._popup_probe)
 
     # ── 组装 ────────────────────────────────────────────
     def setup_ui(self):
@@ -98,10 +129,16 @@ class WorkflowMainWindow(QMainWindow):
         # 中央节点图编辑器
         self.setup_node_graph()
 
-        # 节点库固定宽度、画布占余下空间
+        # 右侧属性面板
+        self.setup_properties_panel()
+
+        # 节点库固定宽度、画布占余下空间（属性面板为悬浮层，不占分割器格）
         self.horizontal_splitter.setStretchFactor(0, 0)
         self.horizontal_splitter.setStretchFactor(1, 1)
-        self.horizontal_splitter.setSizes([tokens.NODE_LIBRARY_WIDTH, WINDOW_WIDTH - tokens.NODE_LIBRARY_WIDTH])
+        self.horizontal_splitter.setSizes([
+            tokens.NODE_LIBRARY_WIDTH,
+            WINDOW_WIDTH - tokens.NODE_LIBRARY_WIDTH,
+        ])
 
         # 底部日志面板
         self.setup_log_window()
@@ -130,24 +167,43 @@ class WorkflowMainWindow(QMainWindow):
         """左侧节点库面板（自定义标题栏，可折叠）"""
         panel = QWidget()
         panel.setObjectName('nodeLibraryPanel')
-        layout = QVBoxLayout(panel)
+        normal = QWidget()
+        layout = QVBoxLayout(normal)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         self.node_library_title = DockTitleBar(
-            '节点库', icon_name='fa5s.shapes', accent_color=tokens.DARK['accent'], parent=panel)
+            '节点库', icon_name='fa5s.shapes', accent_color=tokens.DARK['accent'], parent=normal)
         layout.addWidget(self.node_library_title)
 
         self.node_library = NodeLibraryWidget(self.core_manager, self.theme_state)
         layout.addWidget(self.node_library, 1)
         self.node_library_title.bind_content(self.node_library)
 
+        # 收起条：整体折叠后贴左缘显示「节点库 ▸」，点击展开
+        # 用显示/隐藏切换而非 QStackedLayout——后者最小尺寸取所有页（含隐藏页）最大值，
+        # 隐藏页的 min 宽会继续占位，导致分割器留下空白
+        strip = PanelStrip('节点库', accent_color=tokens.DARK['accent'], side='left',
+                           expand_cb=lambda: self.toggle_node_library(True))
+        strip.setVisible(False)
+        host_layout = QVBoxLayout(panel)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+        host_layout.addWidget(normal, 1)
+        host_layout.addWidget(strip)
+        self.node_library_normal = normal
+        self.node_library_strip = strip
+
         self.node_library_panel = panel
         self.horizontal_splitter.addWidget(panel)
+        self._wire_panel_collapse(self.node_library_title, normal, strip,
+                                  panel, self.horizontal_splitter,
+                                  tokens.NODE_LIBRARY_WIDTH)
 
     def setup_node_graph(self):
         """设置节点图编辑器"""
-        self.node_graph_panel = NodeGraphPanel(self.core_manager, self.theme_state)
+        self.node_graph_panel = NodeGraphPanel(self.core_manager, self.theme_state,
+                                               main_window=self)
         self.horizontal_splitter.addWidget(self.node_graph_panel.get_widget())
 
         # 节点创建后的额外处理（日志；计数由 graph_changed 驱动）
@@ -157,12 +213,13 @@ class WorkflowMainWindow(QMainWindow):
         """底部日志面板（内联标题栏 + 搜索栏 + 日志文本框）"""
         panel = QWidget()
         panel.setObjectName('logPanel')
-        layout = QVBoxLayout(panel)
+        normal = QWidget()
+        layout = QVBoxLayout(normal)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         self.log_title = DockTitleBar(
-            '日志', icon_name='fa5s.terminal', accent_color=tokens.DARK['info'], parent=panel)
+            '日志', icon_name='fa5s.terminal', accent_color=tokens.DARK['info'], parent=normal)
         layout.addWidget(self.log_title)
 
         # 日志正文 + 搜索栏（一起作为可折叠内容）
@@ -193,8 +250,161 @@ class WorkflowMainWindow(QMainWindow):
         layout.addWidget(body, 1)
         self.log_title.bind_content(body)
 
+        # 收起条：整体折叠后贴底显示「日志 ▴」，点击展开
+        strip = PanelStrip('日志', accent_color=tokens.DARK['info'], side='bottom',
+                           expand_cb=lambda: self.toggle_log_panel(True))
+        strip.setVisible(False)
+        host_layout = QVBoxLayout(panel)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+        host_layout.addWidget(normal, 1)
+        host_layout.addWidget(strip)
+        self.log_normal = normal
+        self.log_strip = strip
+
         self.log_panel = panel
         self.vertical_splitter.addWidget(panel)
+        self._wire_panel_collapse(self.log_title, normal, strip,
+                                  panel, self.vertical_splitter, 220)
+
+    def setup_properties_panel(self):
+        """
+        属性面板：悬浮层，覆盖在画布右侧上方。
+
+        不参与分割器布局——出现/消失不改变节点库、画布、日志任何一格的尺寸；
+        面板固定宽 PROPERTIES_WIDTH，内容超出时上下滚动（QScrollArea）。
+        挂在主窗口下（而非画布控件内），避免被 NodeGraphQt 自带样式表污染。
+        """
+        panel = QWidget(self)
+        panel.setObjectName('propertiesPanelHost')
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.properties_title = DockTitleBar(
+            '属性', icon_name='fa5s.sliders-h', accent_color=tokens.DARK['accent'],
+            parent=panel)
+        # 标题栏箭头 = 关闭悬浮层（再展开走视图菜单/双击节点）
+        self.properties_title.set_collapse_callback(
+            lambda collapsed: self.hide_node_properties())
+        layout.addWidget(self.properties_title)
+
+        self.properties_panel = NodePropertiesPanel()
+        layout.addWidget(self.properties_panel, 1)
+
+        self.properties_panel_host = panel
+        self._properties_overlay_parent = self.core_manager.get_widget()
+        self._properties_overlay_parent.installEventFilter(self)
+
+        # 默认不可见：只有双击节点 / 右键→属性 时才唤醒
+        panel.setVisible(False)
+
+    def _overlay_reposition(self):
+        """属性悬浮层贴画布右缘（画布 resize/move 后调用，坐标映射到主窗口）。"""
+        host = getattr(self, 'properties_panel_host', None)
+        gw = getattr(self, '_properties_overlay_parent', None)
+        if host is None or gw is None:
+            return
+        pos = gw.mapTo(self, QPoint(0, 0))
+        host.setGeometry(pos.x() + gw.width() - PROPERTIES_WIDTH - 2,
+                         pos.y() + 2,
+                         PROPERTIES_WIDTH,
+                         max(100, gw.height() - 4))
+
+    # ── 属性面板命令（由画布面板调用） ──────────────────
+    def show_node_properties(self, node, raise_panel=False):
+        """属性悬浮层显示指定节点；raise_panel=True 时聚焦主窗口"""
+        if node is None:
+            return
+        self.toggle_properties_panel(True)
+        self.properties_panel.show_node(node)
+        self.properties_title.set_title(f'属性 · {node.name()}')
+        if raise_panel:
+            self.raise_()
+            self.activateWindow()
+
+    def show_node_properties_if_visible(self, node):
+        """面板可见时才切换到该节点配置；隐藏时不动（单击选中走这里）"""
+        if node is None:
+            return
+        if not self.properties_panel_host.isVisible():
+            return
+        self.properties_panel.show_node(node)
+        self.properties_title.set_title(f'属性 · {node.name()}')
+
+    def clear_node_properties(self):
+        """属性面板回到空态（保留兼容；画布空白点击现走 hide_node_properties）"""
+        self.properties_panel.clear_node()
+        self.properties_title.set_title('属性')
+
+    def hide_node_properties(self):
+        """整体隐藏属性悬浮层（画布空白点击时由画布面板调用）"""
+        self.properties_panel.clear_node()
+        self.properties_title.set_title('属性')
+        self.properties_panel_host.setVisible(False)
+        self._sync_properties_action(False)
+
+    def _wire_panel_collapse(self, title_bar, normal, strip, host, splitter, restore_size):
+        """标题栏箭头 = 折叠为贴边收起条（隐藏常规页、显示收起条、锁 24px）。"""
+        title_bar.set_collapse_callback(
+            lambda collapsed: self._panel_enter_strip(normal, strip, host, splitter))
+        self._panel_restore_sizes[host] = restore_size
+
+    def _panel_enter_strip(self, normal, strip, host, splitter):
+        """面板进入收起条模式：隐藏常规页、显示收起条，并把腾出的空间让给最大格。"""
+        normal.setVisible(False)
+        strip.setVisible(True)
+        vertical = splitter.orientation() == Qt.Vertical
+        if vertical:
+            host.setMaximumHeight(24)
+        else:
+            host.setMaximumWidth(24)
+        self._rebalance_splitter(splitter, host, 24)
+
+    def _panel_exit_strip(self, normal, strip, host, splitter):
+        """面板从收起条展开：解除约束、切回常规页，并按目标宽度要回空间。"""
+        host.setMaximumHeight(16777215)   # QWIDGETSIZE_MAX
+        host.setMaximumWidth(16777215)
+        strip.setVisible(False)
+        normal.setVisible(True)
+        want = self._panel_restore_sizes.get(host, 240)
+        if splitter.orientation() == Qt.Vertical:
+            host.setMinimumHeight(0)
+        else:
+            host.setMinimumWidth(0)
+        self._rebalance_splitter(splitter, host, want)
+
+    def _rebalance_splitter(self, splitter, host, target):
+        """把 host 所在格调整为 target，差额从最大的其它格补/扣（保持总和）。"""
+        idx = splitter.indexOf(host)
+        sizes = list(splitter.sizes())
+        if idx < 0 or idx >= len(sizes) or len(sizes) < 2:
+            return
+        delta = sizes[idx] - target
+        if delta == 0:
+            return
+        sizes[idx] = target
+        j = max((s, i) for i, s in enumerate(sizes) if i != idx)[1]
+        sizes[j] = max(24, sizes[j] - delta)
+        splitter.setSizes(sizes)
+
+    def _sync_properties_action(self, visible):
+        """同步「属性面板」菜单勾选态（setChecked 不触发 triggered，不会回环）"""
+        action = getattr(self, 'properties_panel_action', None)
+        if action is not None:
+            action.setChecked(bool(visible))
+
+    def toggle_properties_panel(self, checked):
+        """属性面板显隐（悬浮层，不触碰分割器，其他视图零扰动）"""
+        visible = bool(checked)
+        if visible:
+            # 必须先定位再显示：否则面板会以旧几何闪现一帧再跳位
+            self._overlay_reposition()
+        self.properties_panel_host.setVisible(visible)
+        if visible:
+            self.properties_panel_host.raise_()
+            self.properties_title.reset()
+        self._sync_properties_action(visible)
 
     def setup_status_bar(self):
         """状态栏：左侧状态点 + 消息，右侧定宽分栏指标"""
@@ -224,7 +434,10 @@ class WorkflowMainWindow(QMainWindow):
         view.viewport().installEventFilter(self)
 
     def eventFilter(self, obj, event):
-        """监听画布滚轮/按键/双击，延后一帧读取缩放值"""
+        """监听画布滚轮/按键/双击，延后一帧读取缩放值；画布 resize/move 时重定位属性悬浮层"""
+        if obj is getattr(self, '_properties_overlay_parent', None) and \
+                event.type() in (QEvent.Resize, QEvent.Move):
+            self._overlay_reposition()
         view = self._graph_view
         if view is not None and obj in (view, view.viewport()):
             if event.type() in (QEvent.Wheel, QEvent.KeyPress, QEvent.MouseButtonDblClick):
@@ -322,13 +535,22 @@ class WorkflowMainWindow(QMainWindow):
         """节点库面板显隐"""
         self.node_library_panel.setVisible(bool(checked))
         if self.node_library_panel.isVisible():
-            self.horizontal_splitter.setSizes(
-                [tokens.NODE_LIBRARY_WIDTH, WINDOW_WIDTH - tokens.NODE_LIBRARY_WIDTH])
+            self._panel_exit_strip(self.node_library_normal, self.node_library_strip,
+                                   self.node_library_panel, self.horizontal_splitter)
+            self.node_library_title.reset()
+            self.horizontal_splitter.setSizes([
+                tokens.NODE_LIBRARY_WIDTH,
+                max(400, WINDOW_WIDTH - tokens.NODE_LIBRARY_WIDTH - PROPERTIES_WIDTH),
+                PROPERTIES_WIDTH,
+            ])
 
     def toggle_log_panel(self, checked):
         """日志面板显隐"""
         self.log_panel.setVisible(bool(checked))
         if self.log_panel.isVisible():
+            self._panel_exit_strip(self.log_normal, self.log_strip,
+                                   self.log_panel, self.vertical_splitter)
+            self.log_title.reset()
             self.vertical_splitter.setSizes([WINDOW_HEIGHT - 220, 220])
 
     # ── 日志 ────────────────────────────────────────────

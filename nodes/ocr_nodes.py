@@ -37,6 +37,7 @@ class OcrNode(WorkflowNode):
         self.add_input('窗口对象', multi_input=False)
         self.add_output('text')
         self.add_output('results')
+        self.add_fail_output()   # 失败分支（未连接时异常终止）
 
         # 属性均用 create_property 注册（可序列化），但不进入通用属性行，
         # 全部由 OcrNodeEditor 渲染（见 ui/node_ocr_widget.py）。

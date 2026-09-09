@@ -37,6 +37,7 @@ class FindImageNode(WorkflowNode):
         self.add_output('坐标')
         self.add_output('中心坐标')
         self.add_output('匹配度')
+        self.add_fail_output()   # 失败分支：未匹配到时可接补救/重试流程
         self._register_storage('mode', _MODES[0])
         self._register_storage('template_path', '')
         self._register_storage('template_data', '')   # base64 PNG/JPEG（内嵌）

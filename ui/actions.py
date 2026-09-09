@@ -181,6 +181,11 @@ def build_menu_bar(window):
                                       window.toggle_log_panel, '显示/隐藏日志窗口',
                                       checkable=True, checked=True)
     view_menu.addAction(window.log_panel_action)
+    window.properties_panel_action = _action(window, '属性面板', Icon.SETTINGS, None,
+                                             window.toggle_properties_panel,
+                                             '显示/隐藏节点属性面板',
+                                             checkable=True, checked=False)
+    view_menu.addAction(window.properties_panel_action)
 
     # ── 工具 ─────────────────────────────────────────
     tools_menu = menu_bar.addMenu('工具')

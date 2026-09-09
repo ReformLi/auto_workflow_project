@@ -7,21 +7,20 @@ node_graph_panel.py
 """
 import logging
 
-from PyQt5 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QMenu
 
 from NodeGraphQt.constants import PipeLayoutEnum, ViewerEnum
 from core.events import event_bus
 from ui import icons, tokens
-from ui.node_properties_dialog import NodePropertiesDialog
 from ui.theme import ThemeState
 
 
 class NodeGraphPanel(QWidget):
     """节点图画布面板（画布配色、网格、连线着色、右键建节点）"""
 
-    def __init__(self, core_manager=None, theme_state=None):
+    def __init__(self, core_manager=None, theme_state=None, main_window=None):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.core_manager = core_manager
@@ -30,6 +29,9 @@ class NodeGraphPanel(QWidget):
         self.view = self.core_manager.get_view()
 
         self.theme_state = theme_state or ThemeState()
+        # 本面板不在主窗口控件树内（只有 NGQ graph widget 进了分割器），
+        # self.window() 会返回自身这个游离顶层控件，因此显式持有主窗口引用。
+        self._main_window = main_window
 
         # 画布视觉（背景 / 网格 / 连线走向）
         self.apply_canvas_theme()
@@ -50,10 +52,35 @@ class NodeGraphPanel(QWidget):
         self._pipe_timer.timeout.connect(self.refresh_pipe_colors)
         event_bus.graph_changed.connect(self._pipe_timer.start)
 
-        # 属性页弹窗：双击节点 / 右键→属性 唤醒
-        self._prop_dialogs = []
+        # 属性面板：双击 / 右键→属性 唤醒；单击选中仅在面板可见时切换内容；
+        # 点击空白处隐藏（面板在主窗口右侧）
         self.graph_manager.node_graph.node_double_clicked.connect(
             self._on_node_double_clicked)
+        self.graph_manager.node_graph.node_selected.connect(
+            self._on_node_selected)
+        self.graph_manager.node_graph.node_selection_changed.connect(
+            self._on_node_selection_changed)
+
+        # 在视图层拦截左键双击：NGQ 的 NodeItem.mouseDoubleClickEvent 遇到双击落在
+        # 标题文字上时会开启就地改名编辑器（弹出 QLineEdit 抢走焦点 → 选中集被清空 →
+        # 属性面板闪现即回空态）。这里自己判定命中节点并唤起属性面板，事件不再下传。
+        self.view.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """拦截画布双击：命中节点则唤起属性面板，避开 NGQ 的标题改名编辑器"""
+        if obj is self.view.viewport() and \
+                event.type() == QtCore.QEvent.MouseButtonDblClick and \
+                event.button() == Qt.LeftButton:
+            node = self._node_at(self.view.mapToScene(event.pos()))
+            if node is not None:
+                try:
+                    has_props = bool(node.get_property_defs())
+                except Exception:
+                    has_props = False
+                if has_props:
+                    self._open_properties(node)
+                return True            # 有无属性都吃掉事件，杜绝改名编辑器闪现
+        return super().eventFilter(obj, event)
 
     def get_widget(self):
         return self.core_manager.get_widget()
@@ -159,45 +186,126 @@ class NodeGraphPanel(QWidget):
             self.logger.error(f"右键创建节点失败: {str(e)}")
 
     def _node_at(self, scene_pos):
-        """返回场景坐标处的节点对象（未命中返回 None）"""
+        """
+        返回场景坐标处的节点对象（未命中返回 None）。
+
+        注意不能用 NGQ 的 _items_near 默认 20x20 矩形——它的矩形以点击点为
+        右下角向左上展开（偏左上），双击节点标题（左上区域）时会漏检，
+        双击事件漏给 NGQ 后就地改名编辑器弹出又随焦点消失（"闪现弹框"）。
+        这里改为以点击点为中心的 6px 小矩形做命中，边缘留 3px 容差。
+        """
         try:
-            items = self.view._items_near(scene_pos)
-            if not items:
-                return None
-            for node in self.graph_manager.node_graph.all_nodes():
-                if node.view in items:
-                    return node
+            rect = QtCore.QRectF(scene_pos.x() - 3, scene_pos.y() - 3, 6, 6)
+            items = self.view.scene().items(rect)
         except Exception:
             return None
+        if not items:
+            return None
+        for node in self.graph_manager.node_graph.all_nodes():
+            if node.view in items:
+                return node
         return None
 
     def _show_node_menu(self, node, view_pos):
-        """显示节点右键菜单（属性；无属性的节点不显示）"""
-        if not node.get_property_defs():
-            return
+        """显示节点右键菜单（属性 / 重命名；无属性的节点只显示重命名）"""
         menu = QMenu(self.view)
-        prop_action = menu.addAction(icons.icon('fa5s.edit', color='#4c8dff'), '属性')
+        prop_action = None
+        try:
+            has_props = bool(node.get_property_defs())
+        except Exception:
+            has_props = False
+        if has_props:
+            prop_action = menu.addAction(
+                icons.icon('fa5s.edit', color='#4c8dff'), '属性')
+        rename_action = menu.addAction(
+            icons.icon('fa5s.i-cursor', color='#8b949e'), '重命名')
         action = menu.exec_(self.view.mapToGlobal(view_pos))
         if action is prop_action:
             self._open_properties(node)
+        elif action is rename_action:
+            self._rename_node(node)
+
+    def _rename_node(self, node):
+        """重命名节点（双击已让位给属性面板，改名入口收拢到右键菜单）"""
+        from PyQt5.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(
+            self.view, '重命名节点', '节点名称:', text=node.name())
+        if not ok:
+            return
+        name = name.strip()
+        if not name:
+            return
+        try:
+            node.set_name(name)
+            self.logger.info(f'节点重命名: {name}')
+        except Exception as e:
+            self.logger.error(f'重命名失败: {e}')
 
     def _on_node_double_clicked(self, node):
-        """双击节点 → 打开属性页（无属性的节点不触发）"""
+        """双击节点 → 面板显示其属性（无属性的节点不触发）"""
         if node.get_property_defs():
             self._open_properties(node)
 
-    def _open_properties(self, node):
-        """打开节点属性页弹窗（保持引用避免被回收）"""
+    def _host_window(self):
+        """真正的主窗口（本面板不在控件树内，不能用 self.window()）"""
+        if self._main_window is None:
+            self.logger.warning('NodeGraphPanel 未注入主窗口引用，属性面板命令无法送达')
+            return self.window()
+        return self._main_window
+
+    def _on_node_selected(self, node):
+        """
+        单击选中节点 → 面板可见时切换到该节点配置（不抢焦点）。
+        面板隐藏时不主动唤醒——按约定只有双击 / 右键→属性才唤起面板。
+        """
+        fn = getattr(self._host_window(), 'show_node_properties_if_visible', None)
+        if callable(fn):
+            fn(node)
+        else:
+            self.logger.warning('主窗口缺少 show_node_properties_if_visible，属性面板未更新')
+
+    def _on_node_selection_changed(self, deselected, selected):
+        """
+        选中集变化 → 同步属性面板。
+
+        注意：NodeGraphQt 0.6.44 该信号的两个参数顺序与命名相反
+        （viewer 发出的是 (当前选中id, 之前选中id)，graph 层按
+        (deselected, selected) 转发），信任入参会在刚选中节点时误判为
+        空选中、把面板瞬间清掉（表现为"属性闪现一下又回到空态"）。
+        因此一律以 selected_nodes() 实测为准。
+        """
         try:
-            node_type = getattr(node, 'type_', '')
-            self.logger.info(f"打开节点属性: {getattr(node, 'name', lambda: node_type)()}")
+            current = list(self.graph_manager.node_graph.selected_nodes())
+        except Exception:
+            current = []
+
+        host = self._host_window()
+        if current:
+            fn = getattr(host, 'show_node_properties_if_visible', None)
+            if callable(fn):
+                fn(current[0])
+            return
+
+        focus = QtWidgets.QApplication.focusWidget()
+        if isinstance(focus, QtWidgets.QLineEdit) and focus.isVisible() and \
+                focus.parentWidget() is not None and \
+                self.view.isAncestorOf(focus.parentWidget()):
+            return                      # NGQ 标题改名中，不是真的取消选中
+        fn = getattr(host, 'hide_node_properties', None)
+        if callable(fn):
+            fn()                        # 点击空白处 → 面板整体隐藏
+
+    def _open_properties(self, node):
+        """显式打开属性（双击/右键）：面板显示并确保可见"""
+        try:
+            self.logger.info(f"打开节点属性: {node.name()}")
         except Exception:
             pass
-        dialog = NodePropertiesDialog(node, parent=self.window())
-        self._prop_dialogs.append(dialog)
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        fn = getattr(self._host_window(), 'show_node_properties', None)
+        if callable(fn):
+            fn(node, raise_panel=True)
+        else:
+            self.logger.warning('主窗口缺少 show_node_properties，属性面板未能显示')
 
     @staticmethod
     def _group_by_category(nodes_info):

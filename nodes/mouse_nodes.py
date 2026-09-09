@@ -61,6 +61,7 @@ class MouseClickNode(WorkflowNode):
         self.add_input('coords', multi_input=False)
         self.add_input('window', multi_input=False)
         self.add_output('out')
+        self.add_fail_output()   # 失败分支（未连接时异常终止）
 
         self._register_storage('button', _BUTTONS[0])
         self._register_storage('click_type', _CLICK_TYPES[0])

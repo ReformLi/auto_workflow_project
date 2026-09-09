@@ -31,9 +31,11 @@ def discover_nodes():
         # 动态导入模块
         module = importlib.import_module(f'.{module_name}', package=__package__)
 
-        # 从模块中提取 WorkflowNode 的子类
+        # 从模块中提取本模块内定义的 WorkflowNode 子类
+        # （跳过 import 进来的类，避免同一节点类被重复收集/注册）
         for name, obj in inspect.getmembers(module, inspect.isclass):
-            if issubclass(obj, WorkflowNode) and obj is not WorkflowNode:
+            if (issubclass(obj, WorkflowNode) and obj is not WorkflowNode
+                    and obj.__module__ == module.__name__):
                 node_classes.append(obj)
 
     return node_classes

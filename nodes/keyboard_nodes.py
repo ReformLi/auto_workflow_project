@@ -74,6 +74,7 @@ class HotkeyNode(WorkflowNode):
         super().__init__()
         self.add_input('window', multi_input=False)   # 可选：后台目标窗口句柄
         self.add_output('out')
+        self.add_fail_output()   # 失败分支（未连接时异常终止）
 
         self.add_text_input('keys', '快捷键组合', 'ctrl+c',
                             placeholder_text='如 ctrl+shift+a / enter / f5，用 + 连接')
@@ -150,6 +151,7 @@ class TypeTextNode(WorkflowNode):
         self.add_input('text', multi_input=False)      # 可选：上游字符串，覆盖手动内容
         self.add_input('window', multi_input=False)    # 可选：后台目标窗口句柄
         self.add_output('out')
+        self.add_fail_output()   # 失败分支（未连接时异常终止）
 
         self.add_multiline_input('content', '文本内容', '',
                                  tooltip='要输入的文本；若连接了 text 输入则忽略此处')

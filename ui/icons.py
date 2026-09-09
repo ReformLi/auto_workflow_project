@@ -126,3 +126,20 @@ def clear_cache():
     """主题切换时清空缓存（当前仅深色主题，预留）"""
     _ICON_CACHE.clear()
     node_icon_path.cache_clear()
+
+
+def warmup_node_icons(node_classes):
+    """主线程预热节点图标文件缓存。
+
+    子工作流节点会在工作线程中创建节点并触发 _apply_visual_style →
+    node_icon_path（内部使用 QPixmap，非 GUI 线程不安全）。启动时在主线程
+    把所有节点的图标 PNG 生成落盘后，工作线程命中 lru_cache 文件路径，不再触碰 QPixmap。
+    """
+    try:
+        bg = tokens.DARK['bg_canvas']
+        for cls in node_classes:
+            category = getattr(cls, 'NODE_CATEGORY', None)
+            name = getattr(cls, 'NODE_ICON', None) or tokens.category_icon(category)
+            node_icon_path(name, bg)
+    except Exception:
+        pass

@@ -78,9 +78,11 @@ NODE_ITEM_HEIGHT = 52
 NODE_CATEGORIES = {
     '开始':     {'label': '开始',     'group': '流程',      'color': '#3fb950', 'icon': 'fa5s.play-circle'},
     '结束':     {'label': '结束',     'group': '流程',      'color': '#f85149', 'icon': 'fa5s.stop-circle'},
+    '子流程':   {'label': '子流程',   'group': '流程',      'color': '#6e7681', 'icon': 'fa5s.project-diagram'},
     '条件判断': {'label': '条件判断', 'group': '控制流',    'color': '#d29922', 'icon': 'fa5s.code-branch'},
     '循环':     {'label': '循环',     'group': '控制流',    'color': '#a371f7', 'icon': 'fa5s.sync'},
     '等待':     {'label': '等待',     'group': '控制流',    'color': '#8b949e', 'icon': 'fa5s.clock'},
+    '容错':     {'label': '容错',     'group': '控制流',    'color': '#f0883e', 'icon': 'fa5s.shield-alt'},
     '输入操作': {'label': '输入操作', 'group': '自动化操作', 'color': '#58a6ff', 'icon': 'fa5s.mouse-pointer'},
     '窗口操作': {'label': '窗口操作', 'group': '自动化操作', 'color': '#39c5cf', 'icon': 'fa5s.window-restore'},
     '图像识别': {'label': '图像识别', 'group': '自动化操作', 'color': '#db61a2', 'icon': 'fa5s.image'},

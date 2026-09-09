@@ -221,6 +221,7 @@ class NodeLibraryWidget(QWidget):
     def reload_nodes(self):
         """按分类重建条目（数据来自 core_manager.get_available_nodes）"""
         for section, _ in self._sections:
+            section.hide()          # 先隐藏：可见控件 setParent(None) 会闪现顶层窗口
             section.setParent(None)
             section.deleteLater()
         self._sections = []

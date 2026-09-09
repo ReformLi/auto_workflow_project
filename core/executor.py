@@ -16,6 +16,7 @@ from PyQt5.QtCore import QObject, QThread
 
 from core.events import event_bus
 from nodes import WorkflowNode
+from nodes._control_common import WorkflowInterrupted
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +101,27 @@ class WorkflowWorker(QObject):
                     inputs = self._collect_inputs(current_node, node_outputs)
                     inputs['__trigger__'] = (
                         next_in_port.name() if next_in_port is not None else None)
+            except WorkflowInterrupted:
+                raise
             except Exception as e:
                 elapsed = time.time() - start_time
                 event_bus.node_exec_finished.emit(node_id, elapsed, True)
-                event_bus.error_occurred.emit(f"节点 {node_name} 执行失败:{str(e)}")
-                break
+                # 失败分支：节点连接了 fail 出口时流转到下游，而不是终止工作流
+                next_node = next_in = None
+                for port in current_node.output_ports():
+                    if port.name() == 'fail':
+                        conns = port.connected_ports()
+                        if conns:
+                            next_in = conns[0]
+                            next_node = next_in.node()
+                        break
+                if next_node is None:
+                    event_bus.error_occurred.emit(f"节点 {node_name} 执行失败:{str(e)}")
+                    break
+                logger.info(f"节点「{node_name}」执行失败，转入 fail 分支: {str(e)}")
+                current_node = next_node
+                inputs = self._collect_inputs(current_node, node_outputs)
+                inputs['__trigger__'] = next_in.name()
 
     def _collect_inputs(self, node, node_outputs: Dict) -> Dict:
         """收集节点的输入数据（从上游节点输出）"""

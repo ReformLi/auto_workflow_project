@@ -13,9 +13,35 @@ from abc import ABC, abstractmethod
 
 from NodeGraphQt import BaseNode
 from NodeGraphQt.constants import NodePropWidgetEnum
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtCore, QtWidgets, QtGui
 
 from ui import icons, tokens
+
+
+class _SummaryItem(QtWidgets.QGraphicsTextItem):
+    """节点下方的摘要胶囊：圆角底 + 描边 + 分类色文字（属性改动即时反馈）。"""
+
+    def __init__(self, parent=None, accent='#8b949e'):
+        super().__init__(parent)
+        self._accent = QtGui.QColor(accent)
+        self._bg = QtGui.QColor(tokens.DARK['bg_elevated'])
+        self._border = QtGui.QColor(tokens.DARK['border'])
+        self.setFont(QtGui.QFont(tokens.FONT_FAMILY_UI, 8))
+        self.setAcceptedMouseButtons(QtCore.Qt.NoButton)
+
+    def set_accent(self, color):
+        self._accent = QtGui.QColor(color)
+        self.setDefaultTextColor(self._accent)
+
+    def paint(self, painter, option, widget=None):
+        rect = self.boundingRect()
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.setBrush(self._bg)
+        painter.setPen(QtGui.QPen(self._border, 1))
+        painter.drawRoundedRect(rect.adjusted(1, 3, -1, -3), 6, 6)
+        painter.restore()
+        super().paint(painter, option, widget)
 
 
 class WorkflowNode(BaseNode, ABC):
@@ -61,27 +87,27 @@ class WorkflowNode(BaseNode, ABC):
         # 属性定义（供节点属性页渲染；不入节点体，节点图只显示节点本身）
         self._prop_defs = []
 
-        # 节点摘要文本（如条件表达式摘要），放在节点体下方，可选
-        sum_font = QtGui.QFont()
-        sum_font.setPointSize(7)
-        self.summary_text = QtWidgets.QGraphicsTextItem(self.view)  # type: ignore
-        self.summary_text.setFont(sum_font)
-        self.summary_text.document().setDefaultStyleSheet("div { margin:0; padding:0; }")
-        self.summary_text.setDefaultTextColor(QtGui.QColor(tokens.DARK['text_dim']))
+        # 节点摘要胶囊（如条件表达式摘要），显示在节点体正下方
+        self.summary_text = _SummaryItem(self.view,  # type: ignore
+                                         accent=tokens.category_color(self.NODE_CATEGORY))
         self.summary_text.setVisible(False)
 
+        # 端口/摘要就绪后做一次宽度自适应（singleShot：等子类 __init__ 跑完）
+        QtCore.QTimer.singleShot(0, self._fit_width)
+
     def set_summary(self, text):
-        """在节点体下方显示摘要文本（空串则隐藏）。"""
+        """在节点体正下方显示摘要胶囊（空串则隐藏）。"""
         if not self.view:
             return
         self.summary_text.setPlainText(text)
         self.summary_text.setVisible(bool(text))
         if not text:
             return
+        self.summary_text.setTextWidth(-1)      # 宽度按内容自适应
         node_rect = self.view.boundingRect()
         text_rect = self.summary_text.boundingRect()
-        x = 6
-        y = node_rect.height() - text_rect.height() - 6
+        x = (node_rect.width() - text_rect.width()) / 2
+        y = node_rect.height() + 2
         self.summary_text.setPos(x, y)
         self.summary_text.update()
 
@@ -92,6 +118,92 @@ class WorkflowNode(BaseNode, ABC):
     def _summary_text(self) -> str:
         """节点摘要字符串，默认空。"""
         return ''
+
+    # ---------------- 节点显示：宽度自适应 / tooltip / 端口语义色 ----------------
+    def _fit_width(self):
+        """
+        按行计算端口文本所需宽度，只放宽、不收窄（NGQ 默认宽度为下限）。
+        实测横向布局：输入文本左对齐 x≈6，输出文本右对齐到 width-5，
+        因此同一行需要 6 + 输入宽 + 间距(24) + 输出宽 + 端口与边距(19)。
+        """
+        view = self.view
+        if view is None:
+            return
+        widths = [float(view.width)]                     # 不收窄：默认宽度为下限
+        try:
+            title_fm = QtGui.QFontMetrics(
+                QtGui.QFont(tokens.FONT_FAMILY_UI, tokens.FONT_SIZE_UI + 1, QtGui.QFont.Bold))
+            widths.append(title_fm.horizontalAdvance(self.name()) + 46)  # 标题+图标+边距
+
+            ins = [p for p in self.inputs().values()]
+            outs = [p for p in self.outputs().values()]
+
+            def _text_w(port, is_input):
+                view_m = getattr(port, 'view', None)
+                if view_m is None:
+                    return 0.0
+                getter = (view.get_input_text_item if is_input
+                          else view.get_output_text_item)
+                ti = getter(view_m)
+                if ti is None:
+                    return 0.0
+                return QtGui.QFontMetrics(ti.font()).horizontalAdvance(ti.toPlainText())
+
+            for i in range(max(len(ins), len(outs), 1)):
+                in_w = _text_w(ins[i], True) if i < len(ins) else 0.0
+                out_w = _text_w(outs[i], False) if i < len(outs) else 0.0
+                widths.append(6 + in_w + 24 + out_w + 19)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"_fit_width 度量失败: {e}")
+            return
+        width = int(min(360, max(widths)))
+        if abs(float(view.width) - width) > 1:
+            view.width = width
+        if self.summary_text.isVisible():                # 摘要居中依赖宽度
+            self.set_summary(self._summary_text())
+
+    def _tooltip_text(self) -> str:
+        """hover 摘要：节点名 + 全部已配置属性（属性页之外的第二读取入口）。"""
+        lines = [self.name()]
+        for d in self._prop_defs:
+            v = self.get_property(d['name'])
+            if v is None or str(v).strip() == '':
+                continue
+            lines.append(f"{d['label']}：{str(v)[:48]}")
+        return '\n'.join(lines)
+
+    def refresh_tooltip(self):
+        if self.view is not None:
+            self.view.setToolTip(self._tooltip_text())
+
+    def set_property(self, name, value, push_undo=True):
+        """属性变更后同步节点摘要与 hover 提示。"""
+        super().set_property(name, value, push_undo)
+        if not hasattr(self, 'summary_text'):
+            return        # __init__ 早期（如 set_disabled）会走到这里，摘要尚未创建
+        self.refresh_summary()
+        self.refresh_tooltip()
+
+    def add_input(self, name='input', multi_input=False, display_name=True,
+                  color=None, locked=False, painter_func=None):
+        """输入端口默认 info 蓝（数据进入）；调用方显式传色则优先。"""
+        return super().add_input(name, multi_input, display_name,
+                                 color or tokens.rgb(tokens.DARK['info']),
+                                 locked, painter_func)
+
+    def add_output(self, name='output', multi_output=True, display_name=True,
+                   color=None, locked=False, painter_func=None):
+        """输出端口默认 success 绿（数据流出）。"""
+        return super().add_output(name, multi_output, display_name,
+                                  color or tokens.rgb(tokens.DARK['success']),
+                                  locked, painter_func)
+
+    def add_fail_output(self):
+        """失败分支出口（error 红）。连接后本节点执行异常时流转到该端口下游，
+        而不是终止整个工作流；未连接时保持原行为（异常终止）。"""
+        return super().add_output('fail', multi_output=True, display_name=True,
+                                  color=tokens.rgb(tokens.DARK['error']))
 
     def _apply_visual_style(self):
         """按 NODE_CATEGORY / NODE_ICON 应用节点头部色与图标"""
@@ -227,11 +339,12 @@ class WorkflowNode(BaseNode, ABC):
             if val is not None:
                 d['value'] = val
         defs = list(self._prop_defs)
-        # 特殊节点（查找图片 / OCR 识别 等）使用自定义属性编辑器，
-        # 属性不进入 _prop_defs，但必须保证有属性页（否则双击/右键不弹窗）。
+        # 特殊节点（查找图片 / OCR 识别 / 鼠标点击 / 子工作流 等）使用自定义属性
+        # 编辑器，属性不进入 _prop_defs，但必须保证有属性页（否则双击/右键不弹窗）。
         if not defs and (getattr(self, 'IMAGE_NODE', False)
                          or getattr(self, 'OCR_NODE', False)
-                         or getattr(self, 'MOUSE_NODE', False)):
+                         or getattr(self, 'MOUSE_NODE', False)
+                         or getattr(self, 'SUBFLOW_NODE', False)):
             defs.append({'name': '_custom', 'label': '属性', 'kind': 'text',
                          'value': '', 'items': None, 'capture': False})
         return defs

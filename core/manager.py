@@ -32,6 +32,10 @@ class CoreManager:
         self._node_classes = discover_nodes()
         self.graph_manager.register_node_classes(self._node_classes)
 
+        # 主线程预热节点图标 PNG（子工作流在工作线程创建节点时依赖此缓存）
+        from ui import icons
+        icons.warmup_node_icons(self._node_classes)
+
         # 可在此处连接内部信号，执行额外的业务逻辑
         event_bus.execution_finished.connect(self._on_execution_finished)
 
